@@ -18,9 +18,23 @@ data class DetectionRow(
     val serviceDataHex: String?
 )
 
+data class DeviceSummary(
+    val address: String,
+    val name: String?,
+    val lastSeen: Long,
+    val rssi: Int,
+    val lat: Double?,
+    val lon: Double?,
+    val accuracy: Float?,
+    val provider: String?,
+    val serviceDataHex: String?,
+    val detectionCount: Int
+)
+
 private const val DB_NAME = "bitchat_log.db"
-private const val DB_VER = 1
+private const val DB_VER = 2
 private const val TABLE = "detections"
+private const val DEVICES_TABLE = "device_summaries"
 private const val MAX_ROWS = 1000
 
 class DetectionDbHelper(ctx: Context) :
@@ -44,15 +58,52 @@ class DetectionDbHelper(ctx: Context) :
             CREATE INDEX idx_${TABLE}_ts ON $TABLE(timestamp);
             """.trimIndent()
         )
+        
+        db.execSQL(
+            """
+            CREATE TABLE $DEVICES_TABLE (
+                address TEXT PRIMARY KEY,
+                name TEXT,
+                last_seen INTEGER NOT NULL,
+                rssi INTEGER NOT NULL,
+                lat REAL,
+                lon REAL,
+                accuracy REAL,
+                provider TEXT,
+                service_data_hex TEXT,
+                detection_count INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX idx_${DEVICES_TABLE}_last_seen ON $DEVICES_TABLE(last_seen);
+            """.trimIndent()
+        )
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // миграций пока нет
+        if (oldVersion < 2) {
+            db.execSQL(
+                """
+                CREATE TABLE $DEVICES_TABLE (
+                    address TEXT PRIMARY KEY,
+                    name TEXT,
+                    last_seen INTEGER NOT NULL,
+                    rssi INTEGER NOT NULL,
+                    lat REAL,
+                    lon REAL,
+                    accuracy REAL,
+                    provider TEXT,
+                    service_data_hex TEXT,
+                    detection_count INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX idx_${DEVICES_TABLE}_last_seen ON $DEVICES_TABLE(last_seen);
+                """.trimIndent()
+            )
+        }
     }
 
     fun insertAndPrune(row: DetectionRow) {
         writableDatabase.beginTransaction()
         try {
+            // Вставляем в основную таблицу
             val cv = ContentValues().apply {
                 put("timestamp", row.timestamp)
                 put("address", row.address)
@@ -66,6 +117,34 @@ class DetectionDbHelper(ctx: Context) :
             }
             writableDatabase.insert(TABLE, null, cv)
 
+            // Обновляем таблицу устройств
+            val deviceCv = ContentValues().apply {
+                put("address", row.address)
+                put("name", row.name)
+                put("last_seen", row.timestamp)
+                put("rssi", row.rssi)
+                put("lat", row.lat)
+                put("lon", row.lon)
+                put("accuracy", row.accuracy)
+                put("provider", row.provider)
+                put("service_data_hex", row.serviceDataHex)
+            }
+            
+            // Используем INSERT OR REPLACE и увеличиваем счетчик
+            writableDatabase.execSQL(
+                """
+                INSERT OR REPLACE INTO $DEVICES_TABLE 
+                (address, name, last_seen, rssi, lat, lon, accuracy, provider, service_data_hex, detection_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                    COALESCE((SELECT detection_count + 1 FROM $DEVICES_TABLE WHERE address = ?), 1))
+                """.trimIndent(),
+                arrayOf(
+                    row.address, row.name, row.timestamp, row.rssi, row.lat, row.lon,
+                    row.accuracy, row.provider, row.serviceDataHex, row.address
+                )
+            )
+
+            // Удаляем старые записи из основной таблицы
             writableDatabase.execSQL(
                 """
                 DELETE FROM $TABLE
@@ -107,6 +186,43 @@ class DetectionDbHelper(ctx: Context) :
                     accuracy = if (!c.isNull(accI)) c.getFloat(accI) else null,
                     provider = c.getString(provI),
                     serviceDataHex = c.getString(sdI)
+                )
+            }
+        }
+        return res
+    }
+
+    /** Очищает все записи из базы данных. */
+    fun clearAll() {
+        writableDatabase.delete(TABLE, null, null)
+        writableDatabase.delete(DEVICES_TABLE, null, null)
+    }
+
+    /** Возвращает все обнаруженные устройства, отсортированные по времени последнего обнаружения. */
+    fun getAllDevices(): List<DeviceSummary> {
+        val res = mutableListOf<DeviceSummary>()
+        readableDatabase.rawQuery(
+            """
+            SELECT address, name, last_seen, rssi, lat, lon, accuracy, provider, service_data_hex, detection_count
+            FROM $DEVICES_TABLE
+            ORDER BY last_seen DESC
+            """.trimIndent(),
+            null
+        ).use { c ->
+            val addrI = 0; val nameI = 1; val lastSeenI = 2; val rssiI = 3
+            val latI = 4; val lonI = 5; val accI = 6; val provI = 7; val sdI = 8; val countI = 9
+            while (c.moveToNext()) {
+                res += DeviceSummary(
+                    address = c.getString(addrI),
+                    name = c.getString(nameI),
+                    lastSeen = c.getLong(lastSeenI),
+                    rssi = c.getInt(rssiI),
+                    lat = if (!c.isNull(latI)) c.getDouble(latI) else null,
+                    lon = if (!c.isNull(lonI)) c.getDouble(lonI) else null,
+                    accuracy = if (!c.isNull(accI)) c.getFloat(accI) else null,
+                    provider = c.getString(provI),
+                    serviceDataHex = c.getString(sdI),
+                    detectionCount = c.getInt(countI)
                 )
             }
         }

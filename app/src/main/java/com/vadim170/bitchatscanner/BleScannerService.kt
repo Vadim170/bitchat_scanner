@@ -31,6 +31,8 @@ class BleScannerService : Service() {
 
     companion object {
         const val ACTION_LOG_LINE = "com.vadim170.bitchatscanner.LOG_LINE"
+        const val ACTION_SCANNER_STARTED = "com.vadim170.bitchatscanner.SCANNER_STARTED"
+        const val ACTION_SCANNER_STOPPED = "com.vadim170.bitchatscanner.SCANNER_STOPPED"
         const val EXTRA_LINE = "line"
         private const val CH_ID = "scan"
         private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
@@ -168,6 +170,7 @@ class BleScannerService : Service() {
         // Без фильтров — отфильтруем в handleResult()
         scanner.startScan(callback)
         sendLine("${sdf.format(Date())},scan_started")
+        sendBroadcast(Intent(ACTION_SCANNER_STARTED))
     }
 
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
@@ -177,6 +180,7 @@ class BleScannerService : Service() {
         val scanner = adapter.bluetoothLeScanner ?: return
         scanner.stopScan(callback)
         sendLine("${sdf.format(Date())},scan_stopped")
+        sendBroadcast(Intent(ACTION_SCANNER_STOPPED))
     }
 
     private fun sendLine(line: String) {

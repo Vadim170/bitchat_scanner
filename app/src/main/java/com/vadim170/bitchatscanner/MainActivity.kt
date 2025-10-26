@@ -42,6 +42,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,7 +54,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.vadim170.bitchatscanner.ui.theme.BitchatScannerTheme
+import com.vadim170.bitchatscanner.viewmodel.MainViewModel
+import com.vadim170.bitchatscanner.viewmodel.DevicesViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -203,61 +207,8 @@ private fun PermCard(title: String, subtitle: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MainScreen(onNavigateToDevices: () -> Unit) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val prefs = remember { context.getSharedPreferences("prefs", Context.MODE_PRIVATE) }
-    var notifyEnabled by rememberSaveable { mutableStateOf(prefs.getBoolean("notify", false)) }
-    var showClearDialog by remember { mutableStateOf(false) }
-
-    val logLines = remember { mutableStateListOf<String>() }
-    val db = remember { DetectionDbHelper(context) }
-
-    // 1) При входе загружаем историю из БД (последние 1000)
-    LaunchedEffect(Unit) {
-        val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
-        val rows = withContext(Dispatchers.IO) { db.latest(1000) }
-        val initial = rows.map { row ->
-            buildString {
-                append(sdf.format(Date(row.timestamp)))
-                append(",")
-                append(row.address)
-                append(", RSSI ")
-                append(row.rssi)
-                if (!row.name.isNullOrEmpty()) {
-                    append(", "); append(row.name)
-                }
-                if (row.lat != null && row.lon != null) {
-                    append(", "); append("lat="); append(row.lat)
-                    append(", lon="); append(row.lon)
-                }
-                if (!row.serviceDataHex.isNullOrEmpty()) {
-                    append(", sd="); append(row.serviceDataHex.take(16)); append("…")
-                }
-            }
-        }
-        logLines.clear()
-        logLines.addAll(initial)
-    }
-
-    // 2) Подписываемся на новые строки от сервиса
-    DisposableEffect(Unit) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(c: Context?, i: Intent?) {
-                if (i?.action == BleScannerService.ACTION_LOG_LINE) {
-                    val line = i.getStringExtra(BleScannerService.EXTRA_LINE) ?: return
-                    logLines.add(0, line)
-                    if (logLines.size > 1000) logLines.removeLast()
-                }
-            }
-        }
-        ContextCompat.registerReceiver(
-            context,
-            receiver,
-            IntentFilter(BleScannerService.ACTION_LOG_LINE),
-            ContextCompat.RECEIVER_NOT_EXPORTED
-        )
-        onDispose { context.unregisterReceiver(receiver) }
-    }
+    val viewModel: MainViewModel = viewModel()
+    val uiState by viewModel.uiState.collectAsState()
 
     // Лаунчер для прав (если нужно вручную)
     val requestPermsLauncher =
@@ -267,24 +218,6 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
 
     fun requestAllPermissions() {
         requestPermsLauncher.launch(allPermissionsToRequest())
-    }
-
-    fun startScanner() {
-        val it = Intent(context, BleScannerService::class.java)
-        ContextCompat.startForegroundService(context, it)
-    }
-
-    fun stopScanner() {
-        context.stopService(Intent(context, BleScannerService::class.java))
-    }
-
-    fun clearLog() {
-        coroutineScope.launch(Dispatchers.IO) {
-            db.clearAll()
-            withContext(Dispatchers.Main) {
-                logLines.clear()
-            }
-        }
     }
 
     Scaffold(
@@ -310,15 +243,20 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Button(onClick = { startScanner() }) { Text("Старт сканера") }
-                Button(onClick = { stopScanner() }) { Text("Стоп") }
+                if (uiState.isScannerRunning) {
+                    Button(onClick = { viewModel.stopScanner() }) { Text("Стоп сканера") }
+                } else {
+                    Button(onClick = { viewModel.startScanner() }) { Text("Старт сканера") }
+                }
+                Button(onClick = { requestAllPermissions() }) { Text("Разрешения") }
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Button(onClick = { showClearDialog = true }) { Text("Очистить лог") }
+                Button(onClick = { viewModel.showClearDialog() }) { Text("Очистить лог") }
+                Button(onClick = onNavigateToDevices) { Text("Устройства") }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -328,11 +266,8 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Switch(
-                    checked = notifyEnabled,
-                    onCheckedChange = {
-                        notifyEnabled = it
-                        prefs.edit { putBoolean("notify", it) }
-                    }
+                    checked = uiState.notifyEnabled,
+                    onCheckedChange = { viewModel.setNotifyEnabled(it) }
                 )
                 Text("Уведомлять об обнаружениях", style = MaterialTheme.typography.bodyLarge)
             }
@@ -342,7 +277,7 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
             Divider(Modifier.padding(vertical = 8.dp))
 
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(logLines) { line ->
+                items(uiState.logLines) { line ->
                     Text(line, style = MaterialTheme.typography.bodySmall)
                     Divider()
                 }
@@ -351,24 +286,21 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
     }
 
     // Диалоговое окно подтверждения очистки лога
-    if (showClearDialog) {
+    if (uiState.showClearDialog) {
         AlertDialog(
-            onDismissRequest = { showClearDialog = false },
+            onDismissRequest = { viewModel.hideClearDialog() },
             title = { Text("Подтверждение") },
             text = { Text("Вы уверены, что хотите очистить весь журнал обнаружений? Это действие нельзя отменить.") },
             confirmButton = {
                 TextButton(
-                    onClick = {
-                        clearLog()
-                        showClearDialog = false
-                    }
+                    onClick = { viewModel.clearAllData() }
                 ) {
                     Text("Очистить")
                 }
             },
             dismissButton = {
                 TextButton(
-                    onClick = { showClearDialog = false }
+                    onClick = { viewModel.hideClearDialog() }
                 ) {
                     Text("Отмена")
                 }
@@ -380,17 +312,8 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DevicesScreen(onNavigateBack: () -> Unit) {
-    val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    val devices = remember { mutableStateListOf<DeviceSummary>() }
-    val db = remember { DetectionDbHelper(context) }
-
-    // Загружаем устройства при входе на экран
-    LaunchedEffect(Unit) {
-        val deviceList = withContext(Dispatchers.IO) { db.getAllDevices() }
-        devices.clear()
-        devices.addAll(deviceList)
-    }
+    val viewModel: DevicesViewModel = viewModel()
+    val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
         topBar = {
@@ -411,15 +334,37 @@ private fun DevicesScreen(onNavigateBack: () -> Unit) {
                 .padding(16.dp)
                 .fillMaxSize()
         ) {
-            if (devices.isEmpty()) {
+            if (uiState.isLoading) {
+                Text(
+                    "Загрузка...",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(16.dp)
+                )
+            } else if (uiState.devices.isEmpty()) {
                 Text(
                     "Устройства не найдены",
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.padding(16.dp)
                 )
             } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Switch(
+                        checked = uiState.showRecentOnly,
+                        onCheckedChange = { viewModel.toggleFilter() }
+                    )
+                    Text(
+                        if (uiState.showRecentOnly) "Недавние (1 час)" else "Вся история",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                
+                Spacer(Modifier.height(8.dp))
+                
                 Text(
-                    "Найдено устройств: ${devices.size}",
+                    "Найдено устройств: ${uiState.devices.size}",
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
@@ -428,7 +373,7 @@ private fun DevicesScreen(onNavigateBack: () -> Unit) {
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(devices) { device ->
+                    items(uiState.devices) { device ->
                         DeviceCard(device = device)
                     }
                 }
@@ -462,6 +407,11 @@ private fun DeviceCard(device: DeviceSummary) {
             
             Text(
                 text = "Последнее обнаружение: ${sdf.format(Date(device.lastSeen))}",
+                style = MaterialTheme.typography.bodySmall
+            )
+            
+            Text(
+                text = "Первое обнаружение: ${sdf.format(Date(device.firstSeen))}",
                 style = MaterialTheme.typography.bodySmall
             )
             

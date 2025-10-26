@@ -22,6 +22,7 @@ data class DeviceSummary(
     val address: String,
     val name: String?,
     val lastSeen: Long,
+    val firstSeen: Long,
     val rssi: Int,
     val lat: Double?,
     val lon: Double?,
@@ -32,7 +33,7 @@ data class DeviceSummary(
 )
 
 private const val DB_NAME = "bitchat_log.db"
-private const val DB_VER = 2
+private const val DB_VER = 3
 private const val TABLE = "detections"
 private const val DEVICES_TABLE = "device_summaries"
 private const val MAX_ROWS = 1000
@@ -65,6 +66,7 @@ class DetectionDbHelper(ctx: Context) :
                 address TEXT PRIMARY KEY,
                 name TEXT,
                 last_seen INTEGER NOT NULL,
+                first_seen INTEGER NOT NULL,
                 rssi INTEGER NOT NULL,
                 lat REAL,
                 lon REAL,
@@ -97,6 +99,12 @@ class DetectionDbHelper(ctx: Context) :
                 CREATE INDEX idx_${DEVICES_TABLE}_last_seen ON $DEVICES_TABLE(last_seen);
                 """.trimIndent()
             )
+        }
+        if (oldVersion < 3) {
+            // Добавляем колонку first_seen
+            db.execSQL("ALTER TABLE $DEVICES_TABLE ADD COLUMN first_seen INTEGER NOT NULL DEFAULT 0")
+            // Устанавливаем first_seen равным last_seen для существующих записей
+            db.execSQL("UPDATE $DEVICES_TABLE SET first_seen = last_seen WHERE first_seen = 0")
         }
     }
 
@@ -134,13 +142,16 @@ class DetectionDbHelper(ctx: Context) :
             writableDatabase.execSQL(
                 """
                 INSERT OR REPLACE INTO $DEVICES_TABLE 
-                (address, name, last_seen, rssi, lat, lon, accuracy, provider, service_data_hex, detection_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                (address, name, last_seen, first_seen, rssi, lat, lon, accuracy, provider, service_data_hex, detection_count)
+                VALUES (?, ?, ?, 
+                    COALESCE((SELECT first_seen FROM $DEVICES_TABLE WHERE address = ?), ?), 
+                    ?, ?, ?, ?, ?, ?, 
                     COALESCE((SELECT detection_count + 1 FROM $DEVICES_TABLE WHERE address = ?), 1))
                 """.trimIndent(),
                 arrayOf(
-                    row.address, row.name, row.timestamp, row.rssi, row.lat, row.lon,
-                    row.accuracy, row.provider, row.serviceDataHex, row.address
+                    row.address, row.name, row.timestamp, row.address, row.timestamp,
+                    row.rssi, row.lat, row.lon, row.accuracy, row.provider, row.serviceDataHex, 
+                    row.address
                 )
             )
 
@@ -203,19 +214,54 @@ class DetectionDbHelper(ctx: Context) :
         val res = mutableListOf<DeviceSummary>()
         readableDatabase.rawQuery(
             """
-            SELECT address, name, last_seen, rssi, lat, lon, accuracy, provider, service_data_hex, detection_count
+            SELECT address, name, last_seen, first_seen, rssi, lat, lon, accuracy, provider, service_data_hex, detection_count
             FROM $DEVICES_TABLE
             ORDER BY last_seen DESC
             """.trimIndent(),
             null
         ).use { c ->
-            val addrI = 0; val nameI = 1; val lastSeenI = 2; val rssiI = 3
-            val latI = 4; val lonI = 5; val accI = 6; val provI = 7; val sdI = 8; val countI = 9
+            val addrI = 0; val nameI = 1; val lastSeenI = 2; val firstSeenI = 3; val rssiI = 4
+            val latI = 5; val lonI = 6; val accI = 7; val provI = 8; val sdI = 9; val countI = 10
             while (c.moveToNext()) {
                 res += DeviceSummary(
                     address = c.getString(addrI),
                     name = c.getString(nameI),
                     lastSeen = c.getLong(lastSeenI),
+                    firstSeen = c.getLong(firstSeenI),
+                    rssi = c.getInt(rssiI),
+                    lat = if (!c.isNull(latI)) c.getDouble(latI) else null,
+                    lon = if (!c.isNull(lonI)) c.getDouble(lonI) else null,
+                    accuracy = if (!c.isNull(accI)) c.getFloat(accI) else null,
+                    provider = c.getString(provI),
+                    serviceDataHex = c.getString(sdI),
+                    detectionCount = c.getInt(countI)
+                )
+            }
+        }
+        return res
+    }
+
+    /** Возвращает устройства, обнаруженные за последний час. */
+    fun getRecentDevices(hoursBack: Int = 1): List<DeviceSummary> {
+        val cutoffTime = System.currentTimeMillis() - (hoursBack * 60 * 60 * 1000)
+        val res = mutableListOf<DeviceSummary>()
+        readableDatabase.rawQuery(
+            """
+            SELECT address, name, last_seen, first_seen, rssi, lat, lon, accuracy, provider, service_data_hex, detection_count
+            FROM $DEVICES_TABLE
+            WHERE last_seen > ?
+            ORDER BY last_seen DESC
+            """.trimIndent(),
+            arrayOf(cutoffTime.toString())
+        ).use { c ->
+            val addrI = 0; val nameI = 1; val lastSeenI = 2; val firstSeenI = 3; val rssiI = 4
+            val latI = 5; val lonI = 6; val accI = 7; val provI = 8; val sdI = 9; val countI = 10
+            while (c.moveToNext()) {
+                res += DeviceSummary(
+                    address = c.getString(addrI),
+                    name = c.getString(nameI),
+                    lastSeen = c.getLong(lastSeenI),
+                    firstSeen = c.getLong(firstSeenI),
                     rssi = c.getInt(rssiI),
                     lat = if (!c.isNull(latI)) c.getDouble(latI) else null,
                     lon = if (!c.isNull(lonI)) c.getDouble(lonI) else null,

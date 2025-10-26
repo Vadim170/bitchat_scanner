@@ -12,8 +12,7 @@ import kotlinx.coroutines.launch
 
 data class DevicesScreenState(
     val devices: List<DeviceSummary> = emptyList(),
-    val isLoading: Boolean = true,
-    val showRecentOnly: Boolean = false
+    val isLoading: Boolean = true
 )
 
 class DevicesViewModel(application: Application) : AndroidViewModel(application) {
@@ -38,26 +37,13 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
     private fun observeDevicesUpdates() {
         viewModelScope.launch {
             repository.devices.collect { devices ->
+                // Сортируем устройства по времени последнего обнаружения (свежие сверху)
+                val sortedDevices = devices.sortedByDescending { it.lastSeen }
                 _uiState.value = _uiState.value.copy(
-                    devices = devices,
+                    devices = sortedDevices,
                     isLoading = false
                 )
             }
-        }
-    }
-    
-    fun toggleFilter() {
-        val newShowRecentOnly = !_uiState.value.showRecentOnly
-        _uiState.value = _uiState.value.copy(showRecentOnly = newShowRecentOnly)
-        
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            if (newShowRecentOnly) {
-                repository.loadRecentDevices(1) // последний час
-            } else {
-                repository.loadDevices() // все устройства
-            }
-            _uiState.value = _uiState.value.copy(isLoading = false)
         }
     }
 }

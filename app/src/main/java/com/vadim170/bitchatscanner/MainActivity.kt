@@ -26,12 +26,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -115,9 +119,12 @@ private fun RootScreen() {
     } else {
         when (currentScreen) {
             Screen.Main -> MainScreen(
-                onNavigateToDevices = { currentScreen = Screen.Devices }
+                onNavigateToLogs = { currentScreen = Screen.Logs }
             )
             Screen.Devices -> DevicesScreen(
+                onNavigateBack = { currentScreen = Screen.Main }
+            )
+            Screen.Logs -> LogsScreen(
                 onNavigateBack = { currentScreen = Screen.Main }
             )
         }
@@ -125,7 +132,7 @@ private fun RootScreen() {
 }
 
 enum class Screen {
-    Main, Devices
+    Main, Devices, Logs
 }
 
 private fun requiredPermissions(): List<String> {
@@ -220,9 +227,12 @@ private fun PermCard(title: String, subtitle: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainScreen(onNavigateToDevices: () -> Unit) {
-    val viewModel: MainViewModel = viewModel()
-    val uiState by viewModel.uiState.collectAsState()
+private fun MainScreen(onNavigateToLogs: () -> Unit) {
+    val mainViewModel: MainViewModel = viewModel()
+    val devicesViewModel: DevicesViewModel = viewModel()
+    val mainUiState by mainViewModel.uiState.collectAsState()
+    val devicesUiState by devicesViewModel.uiState.collectAsState()
+    var showDropdownMenu by remember { mutableStateOf(false) }
 
     // Лаунчер для прав (если нужно вручную)
     val requestPermsLauncher =
@@ -239,8 +249,20 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
             TopAppBar(
                 title = { Text("BitChat Scanner") },
                 actions = {
-                    IconButton(onClick = onNavigateToDevices) {
-                        Icon(Icons.Default.List, contentDescription = "Список устройств")
+                    IconButton(onClick = { showDropdownMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Меню")
+                    }
+                    DropdownMenu(
+                        expanded = showDropdownMenu,
+                        onDismissRequest = { showDropdownMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Журнал обнаружений") },
+                            onClick = {
+                                showDropdownMenu = false
+                                onNavigateToLogs()
+                            }
+                        )
                     }
                 }
             ) 
@@ -257,20 +279,11 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (uiState.isScannerRunning) {
-                    Button(onClick = { viewModel.stopScanner() }) { Text("Стоп сканера") }
+                if (mainUiState.isScannerRunning) {
+                    Button(onClick = { mainViewModel.stopScanner() }) { Text("Стоп сканера") }
                 } else {
-                    Button(onClick = { viewModel.startScanner() }) { Text("Старт сканера") }
+                    Button(onClick = { mainViewModel.startScanner() }) { Text("Старт сканера") }
                 }
-                // Button(onClick = { requestAllPermissions() }) { Text("Разрешения") }
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Button(onClick = { viewModel.showClearDialog() }) { Text("Очистить лог") }
-                Button(onClick = onNavigateToDevices) { Text("Устройства") }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -280,20 +293,82 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Switch(
-                    checked = uiState.notifyEnabled,
-                    onCheckedChange = { viewModel.setNotifyEnabled(it) }
+                    checked = mainUiState.notifyEnabled,
+                    onCheckedChange = { mainViewModel.setNotifyEnabled(it) }
                 )
                 Text("Уведомлять об обнаружениях", style = MaterialTheme.typography.bodyLarge)
             }
 
             Spacer(Modifier.height(16.dp))
-            Text("Журнал обнаружений", style = MaterialTheme.typography.titleMedium)
-            Divider(Modifier.padding(vertical = 8.dp))
 
+            // Список устройств вместо логов
+            if (devicesUiState.isLoading) {
+                Text(
+                    "Загрузка...",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(16.dp)
+                )
+            } else if (devicesUiState.devices.isEmpty()) {
+                Text(
+                    "Устройства не найдены",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.padding(16.dp)
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(devicesUiState.devices) { device ->
+                        DeviceCard(device = device)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DevicesScreen(onNavigateBack: () -> Unit) {
+    // Убираем отдельный экран устройств, так как они теперь на главном экране
+    onNavigateBack()
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LogsScreen(onNavigateBack: () -> Unit) {
+    val viewModel: MainViewModel = viewModel()
+    val uiState by viewModel.uiState.collectAsState()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Журнал обнаружений") },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                    }
+                },
+                actions = {
+                    Button(onClick = { viewModel.showClearDialog() }) { 
+                        Text("Очистить") 
+                    }
+                }
+            )
+        },
+        modifier = Modifier.fillMaxSize()
+    ) { inner ->
+        Column(
+            modifier = Modifier
+                .padding(inner)
+                .padding(16.dp)
+                .fillMaxSize()
+        ) {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 items(uiState.logLines) { line ->
                     Text(line, style = MaterialTheme.typography.bodySmall)
-                    Divider()
+                    HorizontalDivider()
                 }
             }
         }
@@ -323,83 +398,25 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DevicesScreen(onNavigateBack: () -> Unit) {
-    val viewModel: DevicesViewModel = viewModel()
-    val uiState by viewModel.uiState.collectAsState()
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Обнаруженные устройства") },
-                navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
-                    }
-                }
-            )
-        },
-        modifier = Modifier.fillMaxSize()
-    ) { inner ->
-        Column(
-            modifier = Modifier
-                .padding(inner)
-                .padding(16.dp)
-                .fillMaxSize()
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Switch(
-                    checked = uiState.showRecentOnly,
-                    onCheckedChange = { viewModel.toggleFilter() }
-                )
-                Text(
-                    if (uiState.showRecentOnly) "Недавние (1 час)" else "Вся история",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-            if (uiState.isLoading) {
-                Text(
-                    "Загрузка...",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(16.dp)
-                )
-            } else if (uiState.devices.isEmpty()) {
-                Text(
-                    "Устройства не найдены",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(16.dp)
-                )
-            } else {
-                Text(
-                    "Найдено устройств: ${uiState.devices.size}",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-                
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(uiState.devices) { device ->
-                        DeviceCard(device = device)
-                    }
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun DeviceCard(device: DeviceSummary) {
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US) }
     
+    // Проверяем, видели ли устройство менее минуты назад
+    val currentTime = System.currentTimeMillis()
+    val oneMinuteAgo = currentTime - 60 * 1000 // 60 секунд
+    val isRecentlyDetected = device.lastSeen > oneMinuteAgo
+    
+    // Выбираем цвет карточки
+    val cardColor = if (isRecentlyDetected) {
+        MaterialTheme.colorScheme.tertiaryContainer // Зеленоватый цвет
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant // Обычный серый
+    }
+    
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Column(
             modifier = Modifier.padding(16.dp)
@@ -635,13 +652,6 @@ private fun DeviceMapCard(device: DeviceSummary) {
                 }
                 mapView.invalidate()
             }
-        )
-        
-        // Отладочная информация
-        Text(
-            text = "Точек: ${locations.size} | Карта: ${if (isMapReady) "готова" else "загружается..."}",
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(top = 4.dp)
         )
     } else {
         // Показываем сообщение если нет координат

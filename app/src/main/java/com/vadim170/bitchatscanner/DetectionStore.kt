@@ -18,6 +18,13 @@ data class DetectionRow(
     val serviceDataHex: String?
 )
 
+data class LocationPoint(
+    val lat: Double,
+    val lon: Double,
+    val rssi: Int,
+    val accuracy: Float?
+)
+
 data class DeviceSummary(
     val address: String,
     val name: String?,
@@ -273,5 +280,28 @@ class DetectionDbHelper(ctx: Context) :
             }
         }
         return res
+    }
+    
+    /** Возвращает все координаты обнаружений для конкретного устройства с RSSI и точностью. */
+    fun getDeviceLocations(deviceAddress: String): List<LocationPoint> {
+        val locations = mutableListOf<LocationPoint>()
+        readableDatabase.rawQuery(
+            """
+            SELECT DISTINCT lat, lon, rssi, accuracy
+            FROM $TABLE
+            WHERE address = ? AND lat IS NOT NULL AND lon IS NOT NULL
+            """.trimIndent(),
+            arrayOf(deviceAddress)
+        ).use { c ->
+            val latI = 0; val lonI = 1; val rssiI = 2; val accuracyI = 3
+            while (c.moveToNext()) {
+                val lat = c.getDouble(latI)
+                val lon = c.getDouble(lonI)
+                val rssi = c.getInt(rssiI)
+                val accuracy = if (c.isNull(accuracyI)) null else c.getFloat(accuracyI)
+                locations.add(LocationPoint(lat, lon, rssi, accuracy))
+            }
+        }
+        return locations
     }
 }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -51,17 +52,30 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import org.osmdroid.api.IMapController
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polygon
 import com.vadim170.bitchatscanner.ui.theme.BitchatScannerTheme
 import com.vadim170.bitchatscanner.viewmodel.MainViewModel
 import com.vadim170.bitchatscanner.viewmodel.DevicesViewModel
+import com.vadim170.bitchatscanner.repository.ScannerRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.*
 import androidx.core.content.edit
 
@@ -248,7 +262,7 @@ private fun MainScreen(onNavigateToDevices: () -> Unit) {
                 } else {
                     Button(onClick = { viewModel.startScanner() }) { Text("Старт сканера") }
                 }
-                Button(onClick = { requestAllPermissions() }) { Text("Разрешения") }
+                // Button(onClick = { requestAllPermissions() }) { Text("Разрешения") }
             }
 
             Row(
@@ -334,6 +348,19 @@ private fun DevicesScreen(onNavigateBack: () -> Unit) {
                 .padding(16.dp)
                 .fillMaxSize()
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Switch(
+                    checked = uiState.showRecentOnly,
+                    onCheckedChange = { viewModel.toggleFilter() }
+                )
+                Text(
+                    if (uiState.showRecentOnly) "Недавние (1 час)" else "Вся история",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
             if (uiState.isLoading) {
                 Text(
                     "Загрузка...",
@@ -347,22 +374,6 @@ private fun DevicesScreen(onNavigateBack: () -> Unit) {
                     modifier = Modifier.padding(16.dp)
                 )
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Switch(
-                        checked = uiState.showRecentOnly,
-                        onCheckedChange = { viewModel.toggleFilter() }
-                    )
-                    Text(
-                        if (uiState.showRecentOnly) "Недавние (1 час)" else "Вся история",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-                
-                Spacer(Modifier.height(8.dp))
-                
                 Text(
                     "Найдено устройств: ${uiState.devices.size}",
                     style = MaterialTheme.typography.titleMedium,
@@ -420,20 +431,6 @@ private fun DeviceCard(device: DeviceSummary) {
                 style = MaterialTheme.typography.bodySmall
             )
             
-            if (device.lat != null && device.lon != null) {
-                Text(
-                    text = "Координаты: ${String.format("%.6f", device.lat)}, ${String.format("%.6f", device.lon)}",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                
-                if (device.accuracy != null) {
-                    Text(
-                        text = "Точность: ${String.format("%.1f", device.accuracy)} м",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            }
-            
             Text(
                 text = "Обнаружений: ${device.detectionCount}",
                 style = MaterialTheme.typography.bodySmall
@@ -445,6 +442,224 @@ private fun DeviceCard(device: DeviceSummary) {
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+            
+            // Карта с точками обнаружений
+            if (device.lat != null && device.lon != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                DeviceMapCard(device = device)
+            }
         }
+    }
+}
+
+@Composable
+private fun DeviceMapCard(device: DeviceSummary) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var locations by remember { mutableStateOf<List<LocationPoint>>(emptyList()) }
+    var isMapReady by remember { mutableStateOf(false) }
+    
+    // Инициализируем OSMdroid configuration
+    LaunchedEffect(Unit) {
+        Configuration.getInstance().userAgentValue = context.packageName
+    }
+    
+    // Загружаем координаты всех обнаружений для этого устройства
+    LaunchedEffect(device.address) {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                val deviceLocations = ScannerRepository.getInstance(context).getDeviceLocations(device.address)
+                withContext(Dispatchers.Main) {
+                    locations = deviceLocations
+                    println("DeviceMapCard: Loaded ${deviceLocations.size} locations for device ${device.address}")
+                }
+            }
+        }
+    }
+    
+    if (locations.isNotEmpty()) {
+        AndroidView(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .clip(RoundedCornerShape(12.dp)), // Закругляем края
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    setTileSource(TileSourceFactory.MAPNIK)
+                    
+                    // МАКСИМАЛЬНО отключаем все жесты и взаимодействия
+                    setMultiTouchControls(false)
+                    setFlingEnabled(false)
+                    isClickable = false
+                    isFocusable = false
+                    isFocusableInTouchMode = false
+                    
+                    // Отключаем zoom controls полностью
+                    zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
+                    
+                    // Полностью блокируем все сенсорные жесты OSMdroid
+                    overlayManager.tilesOverlay.isEnabled = true  // карту оставляем
+                    
+                    // Переопределяем dispatchTouchEvent чтобы полностью игнорировать касания
+                    setOnTouchListener { _, _ -> true } // Поглощаем все события
+                    
+                    // Дополнительно отключаем анимации и интерактивность
+                    isHorizontalMapRepetitionEnabled = false
+                    isVerticalMapRepetitionEnabled = false
+                    
+                    val mapController: IMapController = controller
+                    
+                    // Вычисляем центр и зону покрытия
+                    val centerLat = locations.map { it.lat }.average()
+                    val centerLon = locations.map { it.lon }.average()
+                    val startPoint = GeoPoint(centerLat, centerLon)
+                    
+                    mapController.setCenter(startPoint)
+                    
+                    // Простая логика масштабирования
+                    if (locations.size == 1) {
+                        // Одна точка - показываем район (zoom 16)
+                        mapController.setZoom(16.0)
+                    } else {
+                        // Несколько точек - используем bounding box с минимальным zoom 15
+                        val geoPoints = locations.map { GeoPoint(it.lat, it.lon) }
+                        val boundingBox = org.osmdroid.util.BoundingBox.fromGeoPoints(geoPoints)
+                        
+                        // Расширяем bounding box чтобы обеспечить минимальный размер ~400м
+                        val minSizeDegrees = 0.004 // примерно 400 метров в градусах
+                        val currentWidthDegrees = boundingBox.lonEast - boundingBox.lonWest
+                        val currentHeightDegrees = boundingBox.latNorth - boundingBox.latSouth
+                        
+                        val expandedBoundingBox = if (currentWidthDegrees < minSizeDegrees || currentHeightDegrees < minSizeDegrees) {
+                            val expandWidth = maxOf(0.0, (minSizeDegrees - currentWidthDegrees) / 2)
+                            val expandHeight = maxOf(0.0, (minSizeDegrees - currentHeightDegrees) / 2)
+                            
+                            org.osmdroid.util.BoundingBox(
+                                boundingBox.latNorth + expandHeight,
+                                boundingBox.lonEast + expandWidth,
+                                boundingBox.latSouth - expandHeight,
+                                boundingBox.lonWest - expandWidth
+                            )
+                        } else {
+                            boundingBox
+                        }
+                        
+                        // Устанавливаем масштаб после создания карты
+                        post {
+                            zoomToBoundingBox(expandedBoundingBox, true, 50)
+                        }
+                    }
+                    
+                    // Рисуем круги вместо маркеров
+                    locations.forEachIndexed { index, location ->
+                        // Вычисляем радиус на основе RSSI и точности GPS
+                        val rssiRadius = calculateRadiusFromRSSI(location.rssi)
+                        val gpsAccuracy = location.accuracy ?: 10f
+                        val finalRadius = maxOf(rssiRadius, gpsAccuracy.toDouble())
+                        
+                        // Создаем круг
+                        val circle = Polygon()
+                        val center = GeoPoint(location.lat, location.lon)
+                        
+                        // Генерируем точки для круга
+                        val circlePoints = mutableListOf<GeoPoint>()
+                        val numPoints = 32
+                        for (i in 0..numPoints) {
+                            val angle = 2 * Math.PI * i / numPoints
+                            val latOffset = finalRadius * Math.cos(angle) / 111320.0 // примерно метры в градусы широты
+                            val lonOffset = finalRadius * Math.sin(angle) / (111320.0 * Math.cos(Math.toRadians(location.lat)))
+                            circlePoints.add(GeoPoint(location.lat + latOffset, location.lon + lonOffset))
+                        }
+                        circle.points = circlePoints
+                        
+                        // Настройка стиля круга - очень прозрачные цвета
+                        circle.fillColor = when {
+                            location.rssi > -50 -> 0x2000FF00 // Едва видимый зеленый (очень сильный сигнал)
+                            location.rssi > -70 -> 0x20FFFF00 // Едва видимый желтый (средний сигнал)
+                            else -> 0x20FF0000 // Едва видимый красный (слабый сигнал)
+                        }
+                        circle.strokeColor = when {
+                            location.rssi > -50 -> 0x6000AA00
+                            location.rssi > -70 -> 0x60AAAA00
+                            else -> 0x60AA0000
+                        }
+                        circle.strokeWidth = 1f
+                        
+                        overlays.add(circle)
+                        
+                        // Маркеры убираем - только круги
+                    }
+                    
+                    isMapReady = true
+                }
+            },
+            update = { mapView ->
+                // Очищаем и обновляем при изменении locations
+                mapView.overlays.clear()
+                
+                if (locations.isNotEmpty()) {
+                    locations.forEachIndexed { index, location ->
+                        val rssiRadius = calculateRadiusFromRSSI(location.rssi)
+                        val gpsAccuracy = location.accuracy ?: 10f
+                        val finalRadius = maxOf(rssiRadius, gpsAccuracy.toDouble())
+                        
+                        val circle = Polygon()
+                        val center = GeoPoint(location.lat, location.lon)
+                        
+                        val circlePoints = mutableListOf<GeoPoint>()
+                        val numPoints = 32
+                        for (i in 0..numPoints) {
+                            val angle = 2 * Math.PI * i / numPoints
+                            val latOffset = finalRadius * Math.cos(angle) / 111320.0
+                            val lonOffset = finalRadius * Math.sin(angle) / (111320.0 * Math.cos(Math.toRadians(location.lat)))
+                            circlePoints.add(GeoPoint(location.lat + latOffset, location.lon + lonOffset))
+                        }
+                        circle.points = circlePoints
+                        
+                        circle.fillColor = when {
+                            location.rssi > -50 -> 0x2000FF00
+                            location.rssi > -70 -> 0x20FFFF00
+                            else -> 0x20FF0000
+                        }
+                        circle.strokeColor = when {
+                            location.rssi > -50 -> 0x6000AA00
+                            location.rssi > -70 -> 0x60AAAA00
+                            else -> 0x60AA0000
+                        }
+                        circle.strokeWidth = 1f
+                        
+                        mapView.overlays.add(circle)
+                        
+                        // Маркеры не добавляем - только круги
+                    }
+                }
+                mapView.invalidate()
+            }
+        )
+        
+        // Отладочная информация
+        Text(
+            text = "Точек: ${locations.size} | Карта: ${if (isMapReady) "готова" else "загружается..."}",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    } else {
+        // Показываем сообщение если нет координат
+        Text(
+            text = "Нет данных о координатах для этого устройства",
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(8.dp)
+        )
+    }
+}
+
+// Функция для вычисления радиуса на основе RSSI
+private fun calculateRadiusFromRSSI(rssi: Int): Double {
+    return when {
+        rssi > -50 -> 5.0   // Очень близко - 5 метров
+        rssi > -60 -> 10.0  // Близко - 10 метров  
+        rssi > -70 -> 20.0  // Средне - 20 метров
+        rssi > -80 -> 50.0  // Далеко - 50 метров
+        else -> 100.0       // Очень далеко - 100 метров
     }
 }

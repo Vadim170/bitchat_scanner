@@ -4,6 +4,7 @@ import android.content.Context
 import com.vadim170.bitchatscanner.DetectionDbHelper
 import com.vadim170.bitchatscanner.DetectionRow
 import com.vadim170.bitchatscanner.DeviceSummary
+import com.vadim170.bitchatscanner.LocationPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -95,5 +96,11 @@ class ScannerRepository private constructor(context: Context) {
     // Метод для обновления устройств при новом обнаружении
     suspend fun refreshDevices() {
         loadDevices()
+    }
+    
+    suspend fun getDeviceLocations(deviceAddress: String): List<LocationPoint> {
+        return withContext(Dispatchers.IO) {
+            db.getDeviceLocations(deviceAddress)
+        }
     }
 }

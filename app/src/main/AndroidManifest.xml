@@ -48,6 +48,6 @@
             android:name=".BleScannerService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|location" />
     </application>
 </manifest>

@@ -1,0 +1,115 @@
+// app/src/main/java/com/vadim170/bitchatscanner/DetectionStore.kt
+package com.vadim170.bitchatscanner
+
+import android.content.ContentValues
+import android.content.Context
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+
+data class DetectionRow(
+    val timestamp: Long,
+    val address: String,
+    val name: String?,
+    val rssi: Int,
+    val lat: Double?,
+    val lon: Double?,
+    val accuracy: Float?,
+    val provider: String?,
+    val serviceDataHex: String?
+)
+
+private const val DB_NAME = "bitchat_log.db"
+private const val DB_VER = 1
+private const val TABLE = "detections"
+private const val MAX_ROWS = 1000
+
+class DetectionDbHelper(ctx: Context) :
+    SQLiteOpenHelper(ctx, DB_NAME, null, DB_VER) {
+
+    override fun onCreate(db: SQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE $TABLE (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,
+                address TEXT NOT NULL,
+                name TEXT,
+                rssi INTEGER NOT NULL,
+                lat REAL,
+                lon REAL,
+                accuracy REAL,
+                provider TEXT,
+                service_data_hex TEXT
+            );
+            CREATE INDEX idx_${TABLE}_ts ON $TABLE(timestamp);
+            """.trimIndent()
+        )
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        // миграций пока нет
+    }
+
+    fun insertAndPrune(row: DetectionRow) {
+        writableDatabase.beginTransaction()
+        try {
+            val cv = ContentValues().apply {
+                put("timestamp", row.timestamp)
+                put("address", row.address)
+                put("name", row.name)
+                put("rssi", row.rssi)
+                put("lat", row.lat)
+                put("lon", row.lon)
+                put("accuracy", row.accuracy)
+                put("provider", row.provider)
+                put("service_data_hex", row.serviceDataHex)
+            }
+            writableDatabase.insert(TABLE, null, cv)
+
+            writableDatabase.execSQL(
+                """
+                DELETE FROM $TABLE
+                WHERE id NOT IN (
+                    SELECT id FROM $TABLE
+                    ORDER BY timestamp DESC
+                    LIMIT $MAX_ROWS
+                )
+                """.trimIndent()
+            )
+            writableDatabase.setTransactionSuccessful()
+        } finally {
+            writableDatabase.endTransaction()
+        }
+    }
+
+    /** Возвращает последние N записей, отсортированные по убыванию времени. */
+    fun latest(limit: Int = MAX_ROWS): List<DetectionRow> {
+        val res = mutableListOf<DetectionRow>()
+        readableDatabase.rawQuery(
+            """
+            SELECT timestamp,address,name,rssi,lat,lon,accuracy,provider,service_data_hex
+            FROM $TABLE
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """.trimIndent(),
+            arrayOf(limit.toString())
+        ).use { c ->
+            val tsI = 0; val addrI = 1; val nameI = 2; val rssiI = 3
+            val latI = 4; val lonI = 5; val accI = 6; val provI = 7; val sdI = 8
+            while (c.moveToNext()) {
+                res += DetectionRow(
+                    timestamp = c.getLong(tsI),
+                    address = c.getString(addrI),
+                    name = c.getString(nameI),
+                    rssi = c.getInt(rssiI),
+                    lat = if (!c.isNull(latI)) c.getDouble(latI) else null,
+                    lon = if (!c.isNull(lonI)) c.getDouble(lonI) else null,
+                    accuracy = if (!c.isNull(accI)) c.getFloat(accI) else null,
+                    provider = c.getString(provI),
+                    serviceDataHex = c.getString(sdI)
+                )
+            }
+        }
+        return res
+    }
+}

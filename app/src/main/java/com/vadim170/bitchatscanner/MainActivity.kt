@@ -84,6 +84,8 @@ import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.cos
+import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -664,16 +666,30 @@ private fun updateMapContent(mapView: MapView, locations: List<LocationPoint>) {
         return
     }
 
+    // Фильтруем точки: для каждой уникальной координаты оставляем только точку с наименьшим радиусом
+    val filteredLocations = locations
+        .groupBy { "${it.lat},${it.lon}" } // Группируем по координатам
+        .mapValues { (_, pointsAtLocation) ->
+            // Для каждой группы выбираем точку с минимальным радиусом
+            pointsAtLocation.minByOrNull { point ->
+                val rssiRadius = calculateRadiusFromRSSI(point.rssi)
+                val gpsAccuracy = point.accuracy ?: 10f
+                maxOf(rssiRadius, gpsAccuracy.toDouble())
+            }!!
+        }
+        .values
+        .toList()
+
     val controller: IMapController = mapView.controller
-    val centerLat = locations.map { it.lat }.average()
-    val centerLon = locations.map { it.lon }.average()
+    val centerLat = filteredLocations.map { it.lat }.average()
+    val centerLon = filteredLocations.map { it.lon }.average()
     val startPoint = GeoPoint(centerLat, centerLon)
     controller.setCenter(startPoint)
 
-    if (locations.size == 1) {
+    if (filteredLocations.size == 1) {
         controller.setZoom(16.0)
     } else {
-        val geoPoints = locations.map { GeoPoint(it.lat, it.lon) }
+        val geoPoints = filteredLocations.map { GeoPoint(it.lat, it.lon) }
         val boundingBox = org.osmdroid.util.BoundingBox.fromGeoPoints(geoPoints)
 
         val minSizeDegrees = 0.004
@@ -699,7 +715,7 @@ private fun updateMapContent(mapView: MapView, locations: List<LocationPoint>) {
         }
     }
 
-    locations.forEach { location ->
+    filteredLocations.forEach { location ->
         val rssiRadius = calculateRadiusFromRSSI(location.rssi)
         val gpsAccuracy = location.accuracy ?: 10f
         val finalRadius = maxOf(rssiRadius, gpsAccuracy.toDouble())
@@ -709,23 +725,23 @@ private fun updateMapContent(mapView: MapView, locations: List<LocationPoint>) {
         val numPoints = 16
         for (i in 0..numPoints) {
             val angle = 2 * Math.PI * i / numPoints
-            val latOffset = finalRadius * Math.cos(angle) / 111320.0
-            val lonOffset = finalRadius * Math.sin(angle) / (111320.0 * Math.cos(Math.toRadians(location.lat)))
+            val latOffset = finalRadius * cos(angle) / 111320.0
+            val lonOffset = finalRadius * sin(angle) / (111320.0 * Math.cos(Math.toRadians(location.lat)))
             circlePoints.add(GeoPoint(location.lat + latOffset, location.lon + lonOffset))
         }
         circle.points = circlePoints
 
         circle.fillColor = when {
-            location.rssi > -50 -> 0x1000FF00
-            location.rssi > -70 -> 0x10FFFF00
-            else -> 0x10FF0000
+            location.rssi > -50 -> 0x4000FF00  // Ярче - зеленый
+            location.rssi > -70 -> 0x40FFFF00  // Ярче - желтый
+            else -> 0x40FF0000                 // Ярче - красный
         }
         circle.strokeColor = when {
-            location.rssi > -50 -> 0x4000AA00
-            location.rssi > -70 -> 0x40AAAA00
-            else -> 0x40AA0000
+            location.rssi > -50 -> 0x8000AA00.toInt()  // Ярче контур - зеленый
+            location.rssi > -70 -> 0x80AAAA00.toInt()  // Ярче контур - желтый
+            else -> 0x80AA0000.toInt()                 // Ярче контур - красный
         }
-        circle.strokeWidth = 1f
+        circle.strokeWidth = 2f
 
         mapView.overlays.add(circle)
     }
@@ -842,8 +858,21 @@ private fun MapScreen(onNavigateBack: () -> Unit) {
                                 }
                             }
                             
-                            // Рисуем круги для всех обнаружений
-                            allLocations.forEach { location ->
+                            // Фильтруем точки: для каждой уникальной координаты оставляем только точку с наименьшим радиусом
+                            val filteredLocations = allLocations
+                                .groupBy { "${it.lat},${it.lon}" }
+                                .mapValues { (_, pointsAtLocation) ->
+                                    pointsAtLocation.minByOrNull { point ->
+                                        val rssiRadius = calculateRadiusFromRSSI(point.rssi)
+                                        val gpsAccuracy = point.accuracy ?: 10f
+                                        maxOf(rssiRadius, gpsAccuracy.toDouble())
+                                    }!!
+                                }
+                                .values
+                                .toList()
+                            
+                            // Рисуем круги для отфильтрованных обнаружений
+                            filteredLocations.forEach { location ->
                                 val rssiRadius = calculateRadiusFromRSSI(location.rssi)
                                 val gpsAccuracy = location.accuracy ?: 10f
                                 val finalRadius = maxOf(rssiRadius, gpsAccuracy.toDouble())
@@ -862,18 +891,18 @@ private fun MapScreen(onNavigateBack: () -> Unit) {
                                 }
                                 circle.points = circlePoints
                                 
-                                // Настройка стиля круга - более прозрачные цвета для наложения
+                                // Настройка стиля круга - яркие цвета
                                 circle.fillColor = when {
-                                    location.rssi > -50 -> 0x1000FF00 // Еще более прозрачные для наложения
-                                    location.rssi > -70 -> 0x10FFFF00
-                                    else -> 0x10FF0000
+                                    location.rssi > -50 -> 0x4000FF00.toInt()  // Ярче - зеленый
+                                    location.rssi > -70 -> 0x40FFFF00.toInt()  // Ярче - желтый
+                                    else -> 0x40FF0000.toInt()                 // Ярче - красный
                                 }
                                 circle.strokeColor = when {
-                                    location.rssi > -50 -> 0x4000AA00
-                                    location.rssi > -70 -> 0x40AAAA00
-                                    else -> 0x40AA0000
+                                    location.rssi > -50 -> 0x8000AA00.toInt()  // Ярче контур - зеленый
+                                    location.rssi > -70 -> 0x80AAAA00.toInt()  // Ярче контур - желтый
+                                    else -> 0x80AA0000.toInt()                 // Ярче контур - красный
                                 }
-                                circle.strokeWidth = 1f
+                                circle.strokeWidth = 2f
                                 
                                 overlays.add(circle)
                             }
@@ -883,7 +912,20 @@ private fun MapScreen(onNavigateBack: () -> Unit) {
                         // Обновляем карту при изменении данных
                         mapView.overlays.clear()
                         
-                        allLocations.forEach { location ->
+                        // Фильтруем точки: для каждой уникальной координаты оставляем только точку с наименьшим радиусом
+                        val filteredLocations = allLocations
+                            .groupBy { "${it.lat},${it.lon}" }
+                            .mapValues { (_, pointsAtLocation) ->
+                                pointsAtLocation.minByOrNull { point ->
+                                    val rssiRadius = calculateRadiusFromRSSI(point.rssi)
+                                    val gpsAccuracy = point.accuracy ?: 10f
+                                    maxOf(rssiRadius, gpsAccuracy.toDouble())
+                                }!!
+                            }
+                            .values
+                            .toList()
+                        
+                        filteredLocations.forEach { location ->
                             val rssiRadius = calculateRadiusFromRSSI(location.rssi)
                             val gpsAccuracy = location.accuracy ?: 10f
                             val finalRadius = maxOf(rssiRadius, gpsAccuracy.toDouble())
@@ -902,16 +944,16 @@ private fun MapScreen(onNavigateBack: () -> Unit) {
                             circle.points = circlePoints
                             
                             circle.fillColor = when {
-                                location.rssi > -50 -> 0x1000FF00
-                                location.rssi > -70 -> 0x10FFFF00
-                                else -> 0x10FF0000
+                                location.rssi > -50 -> 0x4000FF00.toInt()  // Ярче - зеленый
+                                location.rssi > -70 -> 0x40FFFF00.toInt()  // Ярче - желтый
+                                else -> 0x40FF0000.toInt()                 // Ярче - красный
                             }
                             circle.strokeColor = when {
-                                location.rssi > -50 -> 0x4000AA00
-                                location.rssi > -70 -> 0x40AAAA00
-                                else -> 0x40AA0000
+                                location.rssi > -50 -> 0x8000AA00.toInt()  // Ярче контур - зеленый
+                                location.rssi > -70 -> 0x80AAAA00.toInt()  // Ярче контур - желтый
+                                else -> 0x80AA0000.toInt()                 // Ярче контур - красный
                             }
-                            circle.strokeWidth = 1f
+                            circle.strokeWidth = 2f
                             
                             mapView.overlays.add(circle)
                         }

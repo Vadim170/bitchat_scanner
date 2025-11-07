@@ -2,11 +2,12 @@ package com.vadim170.bitchatscanner.screens
 
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -37,48 +38,62 @@ fun PermissionScreen(onGrantAll: () -> Unit) {
         },
         modifier = Modifier.fillMaxSize()
     ) { innerPadding ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .padding(innerPadding)
-                .padding(16.dp)
                 .fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text(
-                text = stringResource(R.string.permissions_description),
-                style = MaterialTheme.typography.bodyLarge
-            )
-
-            // Bluetooth разрешения
-            PermissionCard(
-                title = stringResource(R.string.permission_bluetooth_title),
-                subtitle = stringResource(R.string.permission_bluetooth_subtitle)
-            )
-            
-            // Разрешение на локацию
-            PermissionCard(
-                title = stringResource(R.string.permission_location_title),
-                subtitle = stringResource(R.string.permission_location_subtitle)
-            )
-            
-            // Разрешение на уведомления (только для Android 13+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                PermissionCard(
-                    title = stringResource(R.string.permission_notifications_title),
-                    subtitle = stringResource(R.string.permission_notifications_subtitle)
+            item {
+                Text(
+                    text = stringResource(R.string.permissions_description),
+                    style = MaterialTheme.typography.bodyLarge
                 )
             }
 
-            Spacer(Modifier.height(8.dp))
+            // Bluetooth разрешения
+            item {
+                PermissionCard(
+                    title = stringResource(R.string.permission_bluetooth_title),
+                    subtitle = stringResource(R.string.permission_bluetooth_subtitle)
+                )
+            }
             
-            Button(onClick = onGrantAll) { 
-                Text(stringResource(R.string.grant_permissions)) 
+            // Разрешение на локацию
+            item {
+                PermissionCard(
+                    title = stringResource(R.string.permission_location_title),
+                    subtitle = stringResource(R.string.permission_location_subtitle)
+                )
+            }
+            
+            // Разрешение на уведомления (только для Android 13+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                item {
+                    PermissionCard(
+                        title = stringResource(R.string.permission_notifications_title),
+                        subtitle = stringResource(R.string.permission_notifications_subtitle)
+                    )
+                }
             }
 
-            Text(
-                text = stringResource(R.string.privacy_notice),
-                style = MaterialTheme.typography.bodySmall
-            )
+            item {
+                Spacer(Modifier.height(8.dp))
+            }
+            
+            item {
+                Button(onClick = onGrantAll) { 
+                    Text(stringResource(R.string.grant_permissions)) 
+                }
+            }
+
+            item {
+                Text(
+                    text = stringResource(R.string.privacy_notice),
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
         }
     }
 }

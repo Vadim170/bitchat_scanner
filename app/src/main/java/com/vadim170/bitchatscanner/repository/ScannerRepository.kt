@@ -65,7 +65,7 @@ class ScannerRepository private constructor(context: Context) {
     suspend fun loadDevices() {
         withContext(Dispatchers.IO) {
             val deviceList = db.getAllDevices()
-            _devices.value = deviceList
+            _devices.value = deviceList.toList() // Create a new list to ensure update
         }
     }
     

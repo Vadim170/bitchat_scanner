@@ -10,6 +10,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vadim170.bitchatscanner.BleScannerService
 import com.vadim170.bitchatscanner.repository.ScannerRepository
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,9 +54,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     BleScannerService.ACTION_LOG_LINE -> {
                         val line = intent.getStringExtra(BleScannerService.EXTRA_LINE) ?: return
                         repository.addLogLine(line)
-                        // Обновляем устройства при новом обнаружении
-                        viewModelScope.launch {
-                            repository.refreshDevices()
+                        // Обновляем устройства при новом обнаружении (только если это обнаружение устройства)
+                        if (line.contains(", RSSI ")) {
+                            viewModelScope.launch {
+                                repository.refreshDevices()
+                            }
                         }
                     }
                     BleScannerService.ACTION_SCANNER_STARTED -> {
@@ -106,12 +109,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun startScanner() {
+        // Обновляем состояние немедленно для быстрой реакции UI
+        _uiState.value = _uiState.value.copy(isScannerRunning = true)
+        
         val intent = Intent(getApplication(), BleScannerService::class.java)
         ContextCompat.startForegroundService(getApplication(), intent)
+        
+        // Проверяем реальное состояние через небольшую задержку
+        viewModelScope.launch {
+            delay(500)
+            checkScannerState()
+        }
     }
     
     fun stopScanner() {
+        // Обновляем состояние немедленно для быстрой реакции UI
+        _uiState.value = _uiState.value.copy(isScannerRunning = false)
+        
         getApplication<Application>().stopService(Intent(getApplication(), BleScannerService::class.java))
+        
+        // Проверяем реальное состояние через небольшую задержку
+        viewModelScope.launch {
+            delay(500)
+            checkScannerState()
+        }
     }
     
     fun setNotifyEnabled(enabled: Boolean) {

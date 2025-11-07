@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "582634089808",
+    "project_id": "bitchat-scanner-d2474",
+    "storage_bucket": "bitchat-scanner-d2474.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:582634089808:android:c4f50f41bfec157bcad055",
+        "android_client_info": {
+          "package_name": "com.vadim170.bitchatscanner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC4JYfUSFgf-6_VcU5SLaa0w-GGBaLwo20"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

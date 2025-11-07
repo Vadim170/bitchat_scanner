@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.google.firebase.FirebaseApp
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.vadim170.bitchatscanner.screens.LogsScreen
 import com.vadim170.bitchatscanner.screens.MainScreen
 import com.vadim170.bitchatscanner.screens.MapScreen
@@ -25,6 +27,15 @@ import com.vadim170.bitchatscanner.utils.PermissionUtils
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Инициализация Firebase (если еще не инициализирован)
+        if (FirebaseApp.getApps(this).isEmpty()) {
+            FirebaseApp.initializeApp(this)
+        }
+        
+        // Включаем Crashlytics для тестирования (в debug тоже работает)
+        FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(true)
+        
         enableEdgeToEdge()
         setContent {
             BitchatScannerTheme {

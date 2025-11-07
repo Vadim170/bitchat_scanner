@@ -22,6 +22,7 @@ import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.google.firebase.crashlytics.FirebaseCrashlytics
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -60,7 +61,9 @@ class BleScannerService : Service() {
         }
 
         override fun onScanFailed(errorCode: Int) {
-            sendLine("${sdf.format(Date())},scan_failed,$errorCode")
+            val errorMsg = "${sdf.format(Date())},scan_failed,$errorCode"
+            sendLine(errorMsg)
+            FirebaseCrashlytics.getInstance().log("BLE Scan Failed: errorCode=$errorCode")
         }
     }
 
@@ -93,19 +96,24 @@ class BleScannerService : Service() {
 
         // Сохраняем в БД (и подрезаем историю до 1000)
         io.execute {
-            db.insertAndPrune(
-                DetectionRow(
-                    timestamp = nowMs,
-                    address = addr,
-                    name = name,
-                    rssi = rssi,
-                    lat = lat,
-                    lon = lon,
-                    accuracy = acc,
-                    provider = provider,
-                    serviceDataHex = serviceDataHex
+            try {
+                db.insertAndPrune(
+                    DetectionRow(
+                        timestamp = nowMs,
+                        address = addr,
+                        name = name,
+                        rssi = rssi,
+                        lat = lat,
+                        lon = lon,
+                        accuracy = acc,
+                        provider = provider,
+                        serviceDataHex = serviceDataHex
+                    )
                 )
-            )
+            } catch (e: Exception) {
+                FirebaseCrashlytics.getInstance().log("Error saving detection to DB: $addr")
+                FirebaseCrashlytics.getInstance().recordException(e)
+            }
         }
 
         // Отправим строку для UI-логов
@@ -126,23 +134,31 @@ class BleScannerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        createChannel()
+        try {
+            createChannel()
 
-        val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            val types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
 
-        ServiceCompat.startForeground(
-            this,
-            1,
-            baseNotif("Сканирование BLE…"),
-            types
-        )
+            ServiceCompat.startForeground(
+                this,
+                1,
+                baseNotif("Сканирование BLE…"),
+                types
+            )
 
-        if (!hasScanPermission()) {
-            sendLine("${sdf.format(Date())},no_scan_permission")
-            return
+            FirebaseCrashlytics.getInstance().log("BleScannerService onCreate: service started")
+
+            if (!hasScanPermission()) {
+                sendLine("${sdf.format(Date())},no_scan_permission")
+                FirebaseCrashlytics.getInstance().log("BleScannerService: No scan permission")
+                return
+            }
+            startScan()
+        } catch (e: Exception) {
+            FirebaseCrashlytics.getInstance().recordException(e)
+            throw e
         }
-        startScan()
     }
 
     override fun onDestroy() {
@@ -185,6 +201,12 @@ class BleScannerService : Service() {
 
     private fun sendLine(line: String) {
         sendBroadcast(Intent(ACTION_LOG_LINE).putExtra(EXTRA_LINE, line))
+        // Логируем важные события в Crashlytics
+        if (line.contains("scan_failed") || line.contains("bluetooth_disabled") || 
+            line.contains("no_scan_permission") || line.contains("scan_started") || 
+            line.contains("scan_stopped")) {
+            FirebaseCrashlytics.getInstance().log(line)
+        }
     }
 
     private fun maybeNotify(addr: String, rssi: Int, name: String?) {

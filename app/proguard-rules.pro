@@ -26,3 +26,47 @@
 -keep public class * extends java.lang.Exception
 -keep class com.google.firebase.crashlytics.** { *; }
 -dontwarn com.google.firebase.crashlytics.**
+
+# Keep Crashlytics mapping file
+-keepattributes SourceFile,LineNumberTable
+
+# Compose
+-keep class androidx.compose.** { *; }
+-dontwarn androidx.compose.**
+
+# Keep Compose runtime
+-keep class androidx.compose.runtime.** { *; }
+
+# ViewModel
+-keep class * extends androidx.lifecycle.ViewModel { *; }
+-keep class * extends androidx.lifecycle.AndroidViewModel { *; }
+
+# OSMdroid (может содержать нативный код)
+-keep class org.osmdroid.** { *; }
+-dontwarn org.osmdroid.**
+
+# Keep data classes
+-keep class com.vadim170.bitchatscanner.** { *; }
+-keepclassmembers class com.vadim170.bitchatscanner.** {
+    *;
+}
+
+# Keep data classes constructors and properties
+-keepclassmembers class com.vadim170.bitchatscanner.DetectionRow { *; }
+-keepclassmembers class com.vadim170.bitchatscanner.LocationPoint { *; }
+-keepclassmembers class com.vadim170.bitchatscanner.DeviceSummary { *; }
+
+# Keep Parcelable implementations
+-keep class * implements android.os.Parcelable {
+    public static final android.os.Parcelable$Creator *;
+}
+
+# Keep Serializable classes
+-keepclassmembers class * implements java.io.Serializable {
+    static final long serialVersionUID;
+    private static final java.io.ObjectStreamField[] serialPersistentFields;
+    private void writeObject(java.io.ObjectOutputStream);
+    private void readObject(java.io.ObjectInputStream);
+    java.lang.Object writeReplace();
+    java.lang.Object readResolve();
+}

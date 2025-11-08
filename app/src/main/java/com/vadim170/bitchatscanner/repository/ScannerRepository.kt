@@ -80,7 +80,8 @@ class ScannerRepository private constructor(context: Context) {
         val currentLogs = _logLines.value.toMutableList()
         currentLogs.add(0, line)
         if (currentLogs.size > 1000) {
-            currentLogs.removeLast()
+            // Используем removeAt вместо removeLast() для совместимости с Android 15
+            currentLogs.removeAt(currentLogs.size - 1)
         }
         _logLines.value = currentLogs
     }

@@ -91,17 +91,23 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
         colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // MAC-адрес устройства
-            Text(
-                text = device.address,
-                style = MaterialTheme.typography.titleMedium
-            )
-
-            // Имя устройства (если есть)
+            // Имя устройства как основной заголовок (если есть), иначе MAC-адрес
             if (!device.name.isNullOrEmpty()) {
                 Text(
-                    text = stringResource(R.string.device_name, device.name),
-                    style = MaterialTheme.typography.bodyMedium
+                    text = device.name,
+                    style = MaterialTheme.typography.titleLarge
+                )
+                // MAC-адрес как подзаголовок
+                Text(
+                    text = device.address,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                // Если имени нет, показываем MAC-адрес как заголовок
+                Text(
+                    text = device.address,
+                    style = MaterialTheme.typography.titleMedium
                 )
             }
 

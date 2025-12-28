@@ -1,6 +1,7 @@
 package com.vadim170.bitchatscanner
 
 import android.Manifest
+import android.app.PendingIntent
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
@@ -10,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
+import android.os.Build
 import android.os.ParcelUuid
 import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
@@ -21,9 +23,10 @@ import java.util.concurrent.Executors
 
 /**
  * Singleton manager для BLE-сканирования устройств BitChat.
- * Обеспечивает работу сканирования в двух режимах:
- * - IN_APP: сканирование когда приложение открыто, но сервис не запущен
- * - SERVICE: сканирование через foreground service в фоне
+ * Поддерживает три режима работы:
+ * - IN_APP: активное сканирование когда приложение открыто
+ * - SERVICE: стабильное сканирование через foreground service
+ * - PASSIVE: пассивное сканирование через системные события (энергоэффективное)
  * 
  * Гарантирует, что одновременно работает только один экземпляр сканера.
  */
@@ -35,8 +38,9 @@ class BleScannerManager private constructor(
      * Режимы работы сканера
      */
     enum class ScanMode {
-        IN_APP,   // Сканирование внутри приложения
-        SERVICE   // Сканирование через foreground service
+        IN_APP,    // Сканирование внутри приложения (активный режим)
+        SERVICE,   // Сканирование через foreground service (стабильная работа в фоне)
+        PASSIVE    // Пассивное сканирование (подписка на системные события)
     }
     
     companion object {
@@ -66,7 +70,20 @@ class BleScannerManager private constructor(
     @Volatile
     private var currentMode: ScanMode? = null
     
-    // Callback для BLE сканера
+    // PendingIntent для пассивного сканирования
+    private val passiveScanPendingIntent: PendingIntent by lazy {
+        val intent = Intent(context, PassiveScanReceiver::class.java).apply {
+            action = PassiveScanReceiver.ACTION_FOUND
+        }
+        PendingIntent.getBroadcast(
+            context,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+    }
+    
+    // Callback для BLE сканера (используется в IN_APP и SERVICE режимах)
     private val callback = object : ScanCallback() {
         @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -88,7 +105,7 @@ class BleScannerManager private constructor(
      * Запускает сканирование в указанном режиме.
      * Если сканирование уже активно в другом режиме, сначала останавливает его.
      * 
-     * @param mode Режим сканирования (IN_APP или SERVICE)
+     * @param mode Режим сканирования (IN_APP, SERVICE или PASSIVE)
      * @return true если сканирование успешно запущено, false в противном случае
      */
     @Synchronized
@@ -111,7 +128,12 @@ class BleScannerManager private constructor(
             return false
         }
         
-        if (!startScan()) {
+        val success = when (mode) {
+            ScanMode.PASSIVE -> startPassiveScan()
+            else -> startActiveScan()
+        }
+        
+        if (!success) {
             return false
         }
         
@@ -130,7 +152,10 @@ class BleScannerManager private constructor(
         }
         
         if (hasScanPermission()) {
-            stopScan()
+            when (currentMode) {
+                ScanMode.PASSIVE -> stopPassiveScan()
+                else -> stopActiveScan()
+            }
         }
         
         FirebaseCrashlytics.getInstance().log("BleScannerManager: Stopped scanning in mode $currentMode")
@@ -216,10 +241,10 @@ class BleScannerManager private constructor(
     }
     
     /**
-     * Запускает BLE сканирование
+     * Запускает активное BLE сканирование (для IN_APP и SERVICE режимов)
      */
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
-    private fun startScan(): Boolean {
+    private fun startActiveScan(): Boolean {
         val mgr = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = mgr.adapter
         if (adapter == null) {
@@ -250,16 +275,99 @@ class BleScannerManager private constructor(
     }
     
     /**
-     * Останавливает BLE сканирование
+     * Запускает пассивное BLE сканирование (для PASSIVE режима)
+     * Использует PendingIntent для получения событий от системы
      */
     @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
-    private fun stopScan() {
+    private fun startPassiveScan(): Boolean {
+        val mgr = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = mgr.adapter
+        if (adapter == null) {
+            sendLine("${sdf.format(Date())},bluetooth_not_available")
+            return false
+        }
+        
+        if (!adapter.isEnabled) {
+            sendLine("${sdf.format(Date())},bluetooth_disabled")
+            return false
+        }
+        
+        val scanner = adapter.bluetoothLeScanner
+        if (scanner == null) {
+            sendLine("${sdf.format(Date())},scanner_not_available")
+            return false
+        }
+
+        // Настройки для пассивного сканирования (низкое энергопотребление)
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER)
+            .setReportDelay(0) // Немедленная отправка результатов
+            .build()
+
+        try {
+            // Запускаем сканирование с PendingIntent
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                scanner.startScan(null, settings, passiveScanPendingIntent)
+            } else {
+                // Fallback для старых версий Android - используем активное сканирование
+                return startActiveScan()
+            }
+            sendLine("${sdf.format(Date())},passive_scan_started")
+            context.sendBroadcast(Intent(ACTION_SCANNER_STARTED))
+            return true
+        } catch (e: Exception) {
+            FirebaseCrashlytics.getInstance().log("Failed to start passive scan: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
+            return false
+        }
+    }
+    
+    /**
+     * Останавливает активное BLE сканирование
+     */
+    @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
+    private fun stopActiveScan() {
         val mgr = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         val adapter = mgr.adapter ?: return
         val scanner = adapter.bluetoothLeScanner ?: return
         scanner.stopScan(callback)
         sendLine("${sdf.format(Date())},scan_stopped")
         context.sendBroadcast(Intent(ACTION_SCANNER_STOPPED))
+    }
+    
+    /**
+     * Останавливает пассивное BLE сканирование
+     */
+    @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
+    private fun stopPassiveScan() {
+        val mgr = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+        val adapter = mgr.adapter ?: return
+        val scanner = adapter.bluetoothLeScanner ?: return
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                scanner.stopScan(passiveScanPendingIntent)
+            } else {
+                scanner.stopScan(callback)
+            }
+            sendLine("${sdf.format(Date())},passive_scan_stopped")
+            context.sendBroadcast(Intent(ACTION_SCANNER_STOPPED))
+        } catch (e: Exception) {
+            FirebaseCrashlytics.getInstance().log("Failed to stop passive scan: ${e.message}")
+            FirebaseCrashlytics.getInstance().recordException(e)
+        }
+    }
+    
+    /**
+     * Обрабатывает результат пассивного сканирования.
+     * Вызывается из PassiveScanReceiver при получении события от системы.
+     */
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    fun handlePassiveScanResult(result: ScanResult) {
+        // Проверяем, что мы действительно в пассивном режиме
+        if (currentMode == ScanMode.PASSIVE) {
+            handleResult(result)
+        }
     }
     
     /**

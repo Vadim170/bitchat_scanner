@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -43,6 +44,7 @@ import com.vadim170.bitchatscanner.components.DeviceCard
 import com.vadim170.bitchatscanner.utils.PermissionUtils
 import com.vadim170.bitchatscanner.viewmodel.DevicesViewModel
 import com.vadim170.bitchatscanner.viewmodel.MainViewModel
+import ScanningMode
 
 /**
  * Главный экран приложения
@@ -114,33 +116,75 @@ fun MainScreen(
                 .padding(horizontal = 8.dp)
                 .fillMaxSize()
         ) {
-            // Управление сканером
+            // Информация о текущем режиме сканирования
+            Text(
+                text = when (mainUiState.scanningMode) {
+                    ScanningMode.IN_APP -> 
+                        stringResource(R.string.scanning_in_app)
+                    ScanningMode.SERVICE -> 
+                        stringResource(R.string.scanning_service)
+                    ScanningMode.PASSIVE -> 
+                        stringResource(R.string.scanning_passive)
+                    else -> stringResource(R.string.scanning_stopped)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = when (mainUiState.scanningMode) {
+                    ScanningMode.NONE -> 
+                        MaterialTheme.colorScheme.onSurface
+                    else -> MaterialTheme.colorScheme.primary
+                },
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            // Управление фоновым сканированием
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                when (mainUiState.scanningMode) {
-                    com.vadim170.bitchatscanner.viewmodel.ScanningMode.NONE -> {
-                        // Не сканируем - показываем обе кнопки
-                        Button(onClick = { mainViewModel.startInAppScanning() }) { 
-                            Text(stringResource(R.string.start_in_app_scan)) 
+                Button(
+                    onClick = { 
+                        if (mainUiState.scanningMode == ScanningMode.SERVICE ||
+                            mainUiState.scanningMode == ScanningMode.PASSIVE) {
+                            mainViewModel.stopScanner()
+                        } else {
+                            mainViewModel.startBackgroundScanning()
                         }
-                        Button(onClick = { mainViewModel.startScanner() }) { 
-                            Text(stringResource(R.string.start_service_scan)) 
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { 
+                    Text(
+                        if (mainUiState.scanningMode == ScanningMode.SERVICE ||
+                           mainUiState.scanningMode == ScanningMode.PASSIVE) {
+                            stringResource(R.string.stop_background_scan)
+                        } else {
+                            stringResource(R.string.start_background_scan)
                         }
-                    }
-                    com.vadim170.bitchatscanner.viewmodel.ScanningMode.IN_APP -> {
-                        // Сканируем в приложении
-                        Button(onClick = { mainViewModel.stopScanner() }) { 
-                            Text(stringResource(R.string.stop_in_app_scan)) 
-                        }
-                    }
-                    com.vadim170.bitchatscanner.viewmodel.ScanningMode.SERVICE -> {
-                        // Сканируем через сервис
-                        Button(onClick = { mainViewModel.stopScanner() }) { 
-                            Text(stringResource(R.string.stop_service_scan)) 
-                        }
-                    }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            
+            // Переключатель режима фонового сканирования
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Switch(
+                    checked = mainUiState.useBackgroundService,
+                    onCheckedChange = { mainViewModel.setUseBackgroundService(it) }
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.use_background_service),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = stringResource(R.string.use_background_service_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 

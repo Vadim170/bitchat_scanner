@@ -21,14 +21,16 @@ data class MainScreenState(
     val logLines: List<String> = emptyList(),
     val isScannerRunning: Boolean = false,
     val scanningMode: ScanningMode = ScanningMode.NONE,
+    val useBackgroundService: Boolean = false,
     val notifyEnabled: Boolean = false,
     val showClearDialog: Boolean = false
 )
 
 enum class ScanningMode {
     NONE,       // Сканирование не активно
-    IN_APP,     // Сканирование внутри приложения
-    SERVICE     // Сканирование через service
+    IN_APP,     // Активное сканирование внутри приложения
+    SERVICE,    // Сканирование через foreground service (стабильная работа в фоне)
+    PASSIVE     // Пассивное сканирование (энергоэффективное)
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -45,6 +47,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         setupBroadcastReceiver()
         loadPreferences()
         checkScannerState()
+        // Автоматически запускаем IN_APP сканирование при открытии приложения
+        startInAppScanningIfNeeded()
+    }
+    
+    private fun startInAppScanningIfNeeded() {
+        viewModelScope.launch {
+            delay(500) // Небольшая задержка для завершения инициализации
+            // Проверяем, не запущено ли уже сканирование
+            if (!scannerManager.isScanning()) {
+                // Проверяем настройку фонового сервиса
+                val useService = _uiState.value.useBackgroundService
+                if (!useService) {
+                    // Если фоновый сервис не включен, запускаем IN_APP режим
+                    startInAppScanning()
+                }
+            }
+        }
     }
     
     private fun loadInitialData() {
@@ -97,7 +116,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadPreferences() {
         val prefs = getApplication<Application>().getSharedPreferences("prefs", Context.MODE_PRIVATE)
         val notifyEnabled = prefs.getBoolean("notify", false)
-        _uiState.value = _uiState.value.copy(notifyEnabled = notifyEnabled)
+        val useBackgroundService = prefs.getBoolean("use_background_service", false)
+        _uiState.value = _uiState.value.copy(
+            notifyEnabled = notifyEnabled,
+            useBackgroundService = useBackgroundService
+        )
     }
     
     private fun checkScannerState() {
@@ -112,6 +135,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val scanningMode = when {
             isServiceRunning && currentMode == BleScannerManager.ScanMode.SERVICE -> ScanningMode.SERVICE
             isScanning && currentMode == BleScannerManager.ScanMode.IN_APP -> ScanningMode.IN_APP
+            isScanning && currentMode == BleScannerManager.ScanMode.PASSIVE -> ScanningMode.PASSIVE
             else -> ScanningMode.NONE
         }
         
@@ -133,17 +157,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     /**
-     * Запускает сканирование через foreground service
+     * Запускает фоновое сканирование (SERVICE или PASSIVE в зависимости от настроек)
      */
-    fun startScanner() {
-        // Обновляем состояние немедленно для быстрой реакции UI
-        _uiState.value = _uiState.value.copy(
-            isScannerRunning = true,
-            scanningMode = ScanningMode.SERVICE
-        )
+    fun startBackgroundScanning() {
+        val useService = _uiState.value.useBackgroundService
         
-        val intent = Intent(getApplication(), BleScannerService::class.java)
-        ContextCompat.startForegroundService(getApplication(), intent)
+        if (useService) {
+            // Запускаем через foreground service для стабильной работы
+            _uiState.value = _uiState.value.copy(
+                isScannerRunning = true,
+                scanningMode = ScanningMode.SERVICE
+            )
+            
+            val intent = Intent(getApplication(), BleScannerService::class.java)
+            ContextCompat.startForegroundService(getApplication(), intent)
+        } else {
+            // Запускаем пассивное сканирование (энергоэффективное)
+            val success = scannerManager.startScanning(BleScannerManager.ScanMode.PASSIVE)
+            _uiState.value = _uiState.value.copy(
+                isScannerRunning = success,
+                scanningMode = if (success) ScanningMode.PASSIVE else ScanningMode.NONE
+            )
+        }
         
         // Проверяем реальное состояние через небольшую задержку
         viewModelScope.launch {
@@ -153,7 +188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     /**
-     * Останавливает сканирование (либо service, либо in-app)
+     * Останавливает любое активное сканирование
      */
     fun stopScanner() {
         // Обновляем состояние немедленно для быстрой реакции UI
@@ -167,13 +202,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             getApplication<Application>().stopService(Intent(getApplication(), BleScannerService::class.java))
         }
         
-        // Останавливаем in-app сканирование через manager
+        // Останавливаем любое сканирование через manager
         scannerManager.stopScanning()
         
         // Проверяем реальное состояние через небольшую задержку
         viewModelScope.launch {
             delay(500)
             updateScannerState()
+            // Перезапускаем IN_APP сканирование, если не используется фоновый режим
+            if (!_uiState.value.useBackgroundService) {
+                startInAppScanning()
+            }
         }
     }
     
@@ -199,6 +238,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(notifyEnabled = enabled)
         val prefs = getApplication<Application>().getSharedPreferences("prefs", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("notify", enabled).apply()
+    }
+    
+    fun setUseBackgroundService(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(useBackgroundService = enabled)
+        val prefs = getApplication<Application>().getSharedPreferences("prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("use_background_service", enabled).apply()
+        
+        // Если изменили настройку, перезапускаем сканирование
+        viewModelScope.launch {
+            val currentMode = _uiState.value.scanningMode
+            if (currentMode != ScanningMode.NONE && currentMode != ScanningMode.IN_APP) {
+                // Останавливаем текущее фоновое сканирование
+                stopScanner()
+                delay(500)
+                // Запускаем новое фоновое сканирование с новыми настройками
+                startBackgroundScanning()
+            }
+        }
     }
     
     fun showClearDialog() {

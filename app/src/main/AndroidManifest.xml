@@ -58,5 +58,15 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|location" />
+        
+        <!-- Receiver для пассивного BLE сканирования -->
+        <receiver
+            android:name=".PassiveScanReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.vadim170.bitchatscanner.PASSIVE_SCAN_FOUND" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

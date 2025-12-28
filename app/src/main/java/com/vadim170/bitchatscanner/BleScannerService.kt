@@ -5,38 +5,27 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.bluetooth.BluetoothManager
-import android.bluetooth.le.ScanCallback
-import android.bluetooth.le.ScanResult
-import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.location.Location
-import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
-import android.os.ParcelUuid
 import androidx.annotation.RequiresPermission
-import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.google.firebase.crashlytics.FirebaseCrashlytics
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.concurrent.Executors
 
+/**
+ * Foreground service для BLE сканирования в фоновом режиме.
+ * Использует BleScannerManager для выполнения фактического сканирования.
+ */
 class BleScannerService : Service() {
 
     companion object {
-        const val ACTION_LOG_LINE = "com.vadim170.bitchatscanner.LOG_LINE"
-        const val ACTION_SCANNER_STARTED = "com.vadim170.bitchatscanner.SCANNER_STARTED"
-        const val ACTION_SCANNER_STOPPED = "com.vadim170.bitchatscanner.SCANNER_STOPPED"
-        const val EXTRA_LINE = "line"
         private const val CH_ID = "scan"
-        private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
     }
 
     private val notifyIntent by lazy {
@@ -47,88 +36,33 @@ class BleScannerService : Service() {
         )
     }
 
-    private val db by lazy { DetectionDbHelper(applicationContext) }
-    private val io = Executors.newSingleThreadExecutor()
-
-    private val callback = object : ScanCallback() {
-        @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-        override fun onScanResult(callbackType: Int, result: ScanResult) {
-            handleResult(result)
-        }
-
-        override fun onBatchScanResults(results: MutableList<ScanResult>) {
-            results.forEach(::handleResult)
-        }
-
-        override fun onScanFailed(errorCode: Int) {
-            val errorMsg = "${sdf.format(Date())},scan_failed,$errorCode"
-            sendLine(errorMsg)
-            FirebaseCrashlytics.getInstance().log("BLE Scan Failed: errorCode=$errorCode")
-        }
-    }
-
-    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
-    private fun handleResult(r: ScanResult) {
-        val record = r.scanRecord ?: return
-        val svc = ParcelUuid(BitchatBle.SERVICE_UUID)
-
-        // Учитываем все варианты: Service UUID list, Service Data keys, Service Solicitation UUIDs
-        val matches =
-            (record.serviceUuids?.contains(svc) == true) ||
-                    (record.serviceData?.keys?.any { it.uuid == BitchatBle.SERVICE_UUID } == true) ||
-                    (record.serviceSolicitationUuids?.contains(svc) == true)
-
-        if (!matches) return
-
-        val nowMs = System.currentTimeMillis()
-        val addr = r.device.address ?: "unknown"
-        val name = r.device.name ?: record.deviceName ?: ""
-        val rssi = r.rssi
-
-        val sdBytes = record.serviceData?.get(svc)
-        val serviceDataHex = sdBytes?.joinToString("") { "%02X".format(it) }
-
-        val loc = getBestLastKnownLocation()
-        val lat = loc?.latitude
-        val lon = loc?.longitude
-        val acc = loc?.accuracy
-        val provider = loc?.provider
-
-        // Сохраняем в БД (и подрезаем историю до 1000)
-        io.execute {
-            try {
-                db.insertAndPrune(
-                    DetectionRow(
-                        timestamp = nowMs,
-                        address = addr,
-                        name = name,
-                        rssi = rssi,
-                        lat = lat,
-                        lon = lon,
-                        accuracy = acc,
-                        provider = provider,
-                        serviceDataHex = serviceDataHex
-                    )
-                )
-            } catch (e: Exception) {
-                FirebaseCrashlytics.getInstance().log("Error saving detection to DB: $addr")
-                FirebaseCrashlytics.getInstance().recordException(e)
+    private val scannerManager by lazy { BleScannerManager.getInstance(applicationContext) }
+    
+    // Receiver для обнаружений устройств и отправки уведомлений
+    private val detectionReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BleScannerManager.ACTION_LOG_LINE) {
+                val line = intent.getStringExtra(BleScannerManager.EXTRA_LINE) ?: return
+                // Если это обнаружение устройства, показываем уведомление
+                if (line.contains(", RSSI ")) {
+                    parseAndNotify(line)
+                }
             }
         }
-
-        // Отправим строку для UI-логов
-        val lineHuman = buildString {
-            append(sdf.format(Date(nowMs)))
-            append(",")
-            append(addr)
-            append(", RSSI ")
-            append(rssi)
-            if (name.isNotEmpty()) { append(", "); append(name) }
-            if (lat != null && lon != null) { append(", "); append("lat="); append(lat); append(", lon="); append(lon) }
-            if (!serviceDataHex.isNullOrEmpty()) { append(", sd="); append(serviceDataHex.take(16)); append("…") }
-        }
-        sendLine(lineHuman)
-
+    }
+    
+    /**
+     * Парсит строку обнаружения и показывает уведомление при необходимости
+     */
+    private fun parseAndNotify(line: String) {
+        val parts = line.split(",")
+        if (parts.size < 3) return
+        
+        val addr = parts[1].trim()
+        val rssiPart = parts.find { it.contains("RSSI") }?.trim() ?: return
+        val rssi = rssiPart.substringAfter("RSSI").trim().toIntOrNull() ?: return
+        val name = parts.find { !it.contains(":") && !it.contains("RSSI") && !it.contains("lat=") && !it.contains("lon=") && !it.contains("sd=") }?.trim()
+        
         maybeNotify(addr, rssi, name)
     }
 
@@ -149,12 +83,17 @@ class BleScannerService : Service() {
 
             FirebaseCrashlytics.getInstance().log("BleScannerService onCreate: service started")
 
-            if (!hasScanPermission()) {
-                sendLine("${sdf.format(Date())},no_scan_permission")
-                FirebaseCrashlytics.getInstance().log("BleScannerService: No scan permission")
-                return
-            }
-            startScan()
+            // Регистрируем receiver для обнаружений
+            val intentFilter = IntentFilter(BleScannerManager.ACTION_LOG_LINE)
+            ContextCompat.registerReceiver(
+                this,
+                detectionReceiver,
+                intentFilter,
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            
+            // Запускаем сканирование через manager в режиме SERVICE
+            scannerManager.startScanning(BleScannerManager.ScanMode.SERVICE)
         } catch (e: Exception) {
             FirebaseCrashlytics.getInstance().recordException(e)
             throw e
@@ -163,51 +102,18 @@ class BleScannerService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (hasScanPermission()) stopScan()
-        io.shutdown()
+        // Останавливаем сканирование через manager
+        scannerManager.stopScanning()
+        
+        // Отключаем receiver
+        try {
+            unregisterReceiver(detectionReceiver)
+        } catch (e: Exception) {
+            // Игнорируем ошибки при отключении
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
-
-    @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
-    private fun startScan() {
-        val mgr = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter = mgr.adapter ?: return
-        if (!adapter.isEnabled) {
-            sendLine("${sdf.format(Date())},bluetooth_disabled")
-            return
-        }
-        val scanner = adapter.bluetoothLeScanner ?: return
-
-        val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .build()
-
-        // Без фильтров — отфильтруем в handleResult()
-        scanner.startScan(callback)
-        sendLine("${sdf.format(Date())},scan_started")
-        sendBroadcast(Intent(ACTION_SCANNER_STARTED))
-    }
-
-    @RequiresPermission(Manifest.permission.BLUETOOTH_SCAN)
-    private fun stopScan() {
-        val mgr = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-        val adapter = mgr.adapter ?: return
-        val scanner = adapter.bluetoothLeScanner ?: return
-        scanner.stopScan(callback)
-        sendLine("${sdf.format(Date())},scan_stopped")
-        sendBroadcast(Intent(ACTION_SCANNER_STOPPED))
-    }
-
-    private fun sendLine(line: String) {
-        sendBroadcast(Intent(ACTION_LOG_LINE).putExtra(EXTRA_LINE, line))
-        // Логируем важные события в Crashlytics
-        if (line.contains("scan_failed") || line.contains("bluetooth_disabled") || 
-            line.contains("no_scan_permission") || line.contains("scan_started") || 
-            line.contains("scan_stopped")) {
-            FirebaseCrashlytics.getInstance().log(line)
-        }
-    }
 
     private fun maybeNotify(addr: String, rssi: Int, name: String?) {
         val enabled = getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("notify", false)
@@ -238,29 +144,5 @@ class BleScannerService : Service() {
                 NotificationChannel(CH_ID, "Scanning", NotificationManager.IMPORTANCE_LOW)
             )
         }
-    }
-
-    private fun hasScanPermission(): Boolean =
-        ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) ==
-                PackageManager.PERMISSION_GRANTED
-
-    /** Возвращает «лучшую» lastKnown локацию (если есть разрешение), иначе null. */
-    private fun getBestLastKnownLocation(): Location? {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-            != PackageManager.PERMISSION_GRANTED
-        ) return null
-
-        val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val providers = listOf(
-            LocationManager.GPS_PROVIDER,
-            LocationManager.NETWORK_PROVIDER,
-            LocationManager.PASSIVE_PROVIDER
-        )
-        var best: Location? = null
-        for (p in providers) {
-            val loc = lm.getLastKnownLocation(p) ?: continue
-            if (best == null || loc.time > best!!.time) best = loc
-        }
-        return best
     }
 }

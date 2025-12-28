@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.vadim170.bitchatscanner.BleScannerManager
 import com.vadim170.bitchatscanner.BleScannerService
 import com.vadim170.bitchatscanner.repository.ScannerRepository
 import kotlinx.coroutines.delay
@@ -19,12 +20,20 @@ import kotlinx.coroutines.launch
 data class MainScreenState(
     val logLines: List<String> = emptyList(),
     val isScannerRunning: Boolean = false,
+    val scanningMode: ScanningMode = ScanningMode.NONE,
     val notifyEnabled: Boolean = false,
     val showClearDialog: Boolean = false
 )
 
+enum class ScanningMode {
+    NONE,       // Сканирование не активно
+    IN_APP,     // Сканирование внутри приложения
+    SERVICE     // Сканирование через service
+}
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = ScannerRepository.getInstance(application)
+    private val scannerManager = BleScannerManager.getInstance(application)
     
     private val _uiState = MutableStateFlow(MainScreenState())
     val uiState: StateFlow<MainScreenState> = _uiState.asStateFlow()
@@ -51,8 +60,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         broadcastReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    BleScannerService.ACTION_LOG_LINE -> {
-                        val line = intent.getStringExtra(BleScannerService.EXTRA_LINE) ?: return
+                    BleScannerManager.ACTION_LOG_LINE -> {
+                        val line = intent.getStringExtra(BleScannerManager.EXTRA_LINE) ?: return
                         repository.addLogLine(line)
                         // Обновляем устройства при новом обнаружении (только если это обнаружение устройства)
                         if (line.contains(", RSSI ")) {
@@ -61,20 +70,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             }
                         }
                     }
-                    BleScannerService.ACTION_SCANNER_STARTED -> {
-                        _uiState.value = _uiState.value.copy(isScannerRunning = true)
+                    BleScannerManager.ACTION_SCANNER_STARTED -> {
+                        updateScannerState()
                     }
-                    BleScannerService.ACTION_SCANNER_STOPPED -> {
-                        _uiState.value = _uiState.value.copy(isScannerRunning = false)
+                    BleScannerManager.ACTION_SCANNER_STOPPED -> {
+                        updateScannerState()
                     }
                 }
             }
         }
         
         val intentFilter = IntentFilter().apply {
-            addAction(BleScannerService.ACTION_LOG_LINE)
-            addAction(BleScannerService.ACTION_SCANNER_STARTED)
-            addAction(BleScannerService.ACTION_SCANNER_STOPPED)
+            addAction(BleScannerManager.ACTION_LOG_LINE)
+            addAction(BleScannerManager.ACTION_SCANNER_STARTED)
+            addAction(BleScannerManager.ACTION_SCANNER_STOPPED)
         }
         
         ContextCompat.registerReceiver(
@@ -92,9 +101,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     private fun checkScannerState() {
-        // Проверяем, запущен ли сервис
+        updateScannerState()
+    }
+    
+    private fun updateScannerState() {
         val isServiceRunning = isServiceRunning(BleScannerService::class.java)
-        _uiState.value = _uiState.value.copy(isScannerRunning = isServiceRunning)
+        val isScanning = scannerManager.isScanning()
+        val currentMode = scannerManager.getCurrentMode()
+        
+        val scanningMode = when {
+            isServiceRunning && currentMode == BleScannerManager.ScanMode.SERVICE -> ScanningMode.SERVICE
+            isScanning && currentMode == BleScannerManager.ScanMode.IN_APP -> ScanningMode.IN_APP
+            else -> ScanningMode.NONE
+        }
+        
+        _uiState.value = _uiState.value.copy(
+            isScannerRunning = isScanning,
+            scanningMode = scanningMode
+        )
     }
     
     private fun isServiceRunning(serviceClass: Class<*>): Boolean {
@@ -108,9 +132,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return false
     }
     
+    /**
+     * Запускает сканирование через foreground service
+     */
     fun startScanner() {
         // Обновляем состояние немедленно для быстрой реакции UI
-        _uiState.value = _uiState.value.copy(isScannerRunning = true)
+        _uiState.value = _uiState.value.copy(
+            isScannerRunning = true,
+            scanningMode = ScanningMode.SERVICE
+        )
         
         val intent = Intent(getApplication(), BleScannerService::class.java)
         ContextCompat.startForegroundService(getApplication(), intent)
@@ -118,21 +148,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Проверяем реальное состояние через небольшую задержку
         viewModelScope.launch {
             delay(500)
-            checkScannerState()
+            updateScannerState()
         }
     }
     
+    /**
+     * Останавливает сканирование (либо service, либо in-app)
+     */
     fun stopScanner() {
         // Обновляем состояние немедленно для быстрой реакции UI
-        _uiState.value = _uiState.value.copy(isScannerRunning = false)
+        _uiState.value = _uiState.value.copy(
+            isScannerRunning = false,
+            scanningMode = ScanningMode.NONE
+        )
         
-        getApplication<Application>().stopService(Intent(getApplication(), BleScannerService::class.java))
+        // Останавливаем service если он запущен
+        if (isServiceRunning(BleScannerService::class.java)) {
+            getApplication<Application>().stopService(Intent(getApplication(), BleScannerService::class.java))
+        }
+        
+        // Останавливаем in-app сканирование через manager
+        scannerManager.stopScanning()
         
         // Проверяем реальное состояние через небольшую задержку
         viewModelScope.launch {
             delay(500)
-            checkScannerState()
+            updateScannerState()
         }
+    }
+    
+    /**
+     * Запускает сканирование внутри приложения (без service)
+     */
+    fun startInAppScanning() {
+        // Останавливаем service если он запущен
+        if (isServiceRunning(BleScannerService::class.java)) {
+            getApplication<Application>().stopService(Intent(getApplication(), BleScannerService::class.java))
+        }
+        
+        // Запускаем in-app сканирование
+        val success = scannerManager.startScanning(BleScannerManager.ScanMode.IN_APP)
+        
+        _uiState.value = _uiState.value.copy(
+            isScannerRunning = success,
+            scanningMode = if (success) ScanningMode.IN_APP else ScanningMode.NONE
+        )
     }
     
     fun setNotifyEnabled(enabled: Boolean) {
@@ -160,6 +220,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         broadcastReceiver?.let { receiver ->
             getApplication<Application>().unregisterReceiver(receiver)
+        }
+        // Останавливаем in-app сканирование при закрытии ViewModel
+        if (scannerManager.getCurrentMode() == BleScannerManager.ScanMode.IN_APP) {
+            scannerManager.stopScanning()
         }
     }
 }

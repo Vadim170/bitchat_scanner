@@ -119,13 +119,27 @@ fun MainScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (mainUiState.isScannerRunning) {
-                    Button(onClick = { mainViewModel.stopScanner() }) { 
-                        Text(stringResource(R.string.stop_scanner)) 
+                when (mainUiState.scanningMode) {
+                    com.vadim170.bitchatscanner.viewmodel.ScanningMode.NONE -> {
+                        // Не сканируем - показываем обе кнопки
+                        Button(onClick = { mainViewModel.startInAppScanning() }) { 
+                            Text(stringResource(R.string.start_in_app_scan)) 
+                        }
+                        Button(onClick = { mainViewModel.startScanner() }) { 
+                            Text(stringResource(R.string.start_service_scan)) 
+                        }
                     }
-                } else {
-                    Button(onClick = { mainViewModel.startScanner() }) { 
-                        Text(stringResource(R.string.start_scanner)) 
+                    com.vadim170.bitchatscanner.viewmodel.ScanningMode.IN_APP -> {
+                        // Сканируем в приложении
+                        Button(onClick = { mainViewModel.stopScanner() }) { 
+                            Text(stringResource(R.string.stop_in_app_scan)) 
+                        }
+                    }
+                    com.vadim170.bitchatscanner.viewmodel.ScanningMode.SERVICE -> {
+                        // Сканируем через сервис
+                        Button(onClick = { mainViewModel.stopScanner() }) { 
+                            Text(stringResource(R.string.stop_service_scan)) 
+                        }
                     }
                 }
             }

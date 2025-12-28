@@ -24,9 +24,17 @@ class PassiveScanReceiver : BroadcastReceiver() {
         when (intent.action) {
             ACTION_FOUND -> {
                 // Извлекаем результаты сканирования из intent
-                val scanResults = intent.getParcelableArrayListExtra<ScanResult>(
-                    "android.bluetooth.le.extra.LIST_SCAN_RESULT"
-                )
+                val scanResults = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableArrayListExtra(
+                        "android.bluetooth.le.extra.LIST_SCAN_RESULT",
+                        ScanResult::class.java
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableArrayListExtra<ScanResult>(
+                        "android.bluetooth.le.extra.LIST_SCAN_RESULT"
+                    )
+                }
                 
                 scanResults?.forEach { result ->
                     // Передаем результаты в BleScannerManager для обработки

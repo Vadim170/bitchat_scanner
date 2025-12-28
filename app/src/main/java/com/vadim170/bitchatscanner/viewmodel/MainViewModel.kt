@@ -42,6 +42,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     private var broadcastReceiver: BroadcastReceiver? = null
     
+    companion object {
+        private const val STATE_UPDATE_DELAY_MS = 500L
+    }
+    
     init {
         loadInitialData()
         setupBroadcastReceiver()
@@ -53,7 +57,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     private fun startInAppScanningIfNeeded() {
         viewModelScope.launch {
-            delay(500) // Небольшая задержка для завершения инициализации
+            delay(STATE_UPDATE_DELAY_MS) // Небольшая задержка для завершения инициализации
             // Проверяем, не запущено ли уже сканирование
             if (!scannerManager.isScanning()) {
                 // Проверяем настройку фонового сервиса
@@ -182,7 +186,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         // Проверяем реальное состояние через небольшую задержку
         viewModelScope.launch {
-            delay(500)
+            delay(STATE_UPDATE_DELAY_MS)
             updateScannerState()
         }
     }
@@ -207,7 +211,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         // Проверяем реальное состояние через небольшую задержку
         viewModelScope.launch {
-            delay(500)
+            delay(STATE_UPDATE_DELAY_MS)
             updateScannerState()
             // Перезапускаем IN_APP сканирование, если не используется фоновый режим
             if (!_uiState.value.useBackgroundService) {
@@ -251,7 +255,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (currentMode != ScanningMode.NONE && currentMode != ScanningMode.IN_APP) {
                 // Останавливаем текущее фоновое сканирование
                 stopScanner()
-                delay(500)
+                delay(STATE_UPDATE_DELAY_MS)
                 // Запускаем новое фоновое сканирование с новыми настройками
                 startBackgroundScanning()
             }

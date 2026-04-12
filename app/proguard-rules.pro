@@ -36,7 +36,6 @@
 -keep class * extends androidx.lifecycle.ViewModel { *; }
 -keep class * extends androidx.lifecycle.AndroidViewModel { *; }
 
-# OSMdroid (может содержать нативный код)
 -keep class org.osmdroid.** { *; }
 -dontwarn org.osmdroid.**
 

@@ -17,11 +17,11 @@ class ScannerRepository private constructor(context: Context) {
     private val db = DetectionDbHelper(context.applicationContext)
     private val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
     
-    // Состояние для логов
+
     private val _logLines = MutableStateFlow<List<String>>(emptyList())
     val logLines: Flow<List<String>> = _logLines.asStateFlow()
     
-    // Состояние для устройств
+
     private val _devices = MutableStateFlow<List<DeviceSummary>>(emptyList())
     val devices: Flow<List<DeviceSummary>> = _devices.asStateFlow()
     
@@ -80,7 +80,7 @@ class ScannerRepository private constructor(context: Context) {
         val currentLogs = _logLines.value.toMutableList()
         currentLogs.add(0, line)
         if (currentLogs.size > 1000) {
-            // Используем removeAt вместо removeLast() для совместимости с Android 15
+
             currentLogs.removeAt(currentLogs.size - 1)
         }
         _logLines.value = currentLogs
@@ -94,7 +94,7 @@ class ScannerRepository private constructor(context: Context) {
         }
     }
     
-    // Метод для обновления устройств при новом обнаружении
+
     suspend fun refreshDevices() {
         loadDevices()
     }

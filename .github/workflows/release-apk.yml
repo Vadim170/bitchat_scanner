@@ -2,8 +2,9 @@ name: Release APK
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+      - master
   workflow_dispatch:
 
 concurrency:
@@ -64,6 +65,8 @@ jobs:
 
       - name: Collect release metadata
         id: metadata
+        env:
+          SHORT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
@@ -72,14 +75,16 @@ jobs:
           version_code="$(jq -r '.elements[0].versionCode' "${metadata_file}")"
           output_file="$(jq -r '.elements[0].outputFile' "${metadata_file}")"
           source_apk="app/build/outputs/apk/release/${output_file}"
-          tag_name="v${version_name}"
+          short_sha="${SHORT_SHA:0:7}"
+          tag_name="main-${short_sha}"
+          release_name="main build ${version_name} (${short_sha})"
 
           if [[ ! -f "${source_apk}" ]]; then
             echo "Release APK not found at ${source_apk}" >&2
             exit 1
           fi
 
-          release_apk="bitchat-scanner-v${version_name}.apk"
+          release_apk="bitchat-scanner-${version_name}-${short_sha}.apk"
 
           cp "${source_apk}" "${release_apk}"
 
@@ -87,30 +92,15 @@ jobs:
             echo "version_name=${version_name}"
             echo "version_code=${version_code}"
             echo "tag_name=${tag_name}"
+            echo "release_name=${release_name}"
             echo "release_apk=${release_apk}"
           } >> "${GITHUB_OUTPUT}"
-
-      - name: Validate version tag
-        env:
-          TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-
-          git fetch --tags --force
-
-          if git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null; then
-            tagged_sha="$(git rev-list -n 1 "${TAG_NAME}")"
-
-            if [[ "${tagged_sha}" != "${GITHUB_SHA}" ]]; then
-              echo "Tag ${TAG_NAME} already points to ${tagged_sha}. Bump versionName/versionCode before publishing a new release." >&2
-              exit 1
-            fi
-          fi
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ steps.metadata.outputs.tag_name }}
+          RELEASE_NAME: ${{ steps.metadata.outputs.release_name }}
           VERSION_NAME: ${{ steps.metadata.outputs.version_name }}
           VERSION_CODE: ${{ steps.metadata.outputs.version_code }}
           RELEASE_APK: ${{ steps.metadata.outputs.release_apk }}
@@ -118,7 +108,7 @@ jobs:
           set -euo pipefail
 
           notes_file="${RUNNER_TEMP}/release-notes.txt"
-          printf 'Release APK for version %s (versionCode %s).\n' "${VERSION_NAME}" "${VERSION_CODE}" > "${notes_file}"
+          printf 'Continuous APK build for version %s (versionCode %s) from %s.\n' "${VERSION_NAME}" "${VERSION_CODE}" "${GITHUB_SHA}" > "${notes_file}"
 
           if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
             while IFS= read -r asset_name; do
@@ -127,11 +117,11 @@ jobs:
             done < <(gh release view "${TAG_NAME}" --json assets --jq '.assets[].name | select(endswith(".apk"))')
 
             gh release upload "${TAG_NAME}" "${RELEASE_APK}" --clobber
-            gh release edit "${TAG_NAME}" --title "${TAG_NAME}" --notes-file "${notes_file}" --latest
+            gh release edit "${TAG_NAME}" --title "${RELEASE_NAME}" --notes-file "${notes_file}" --prerelease
           else
             gh release create "${TAG_NAME}" "${RELEASE_APK}" \
-              --title "${TAG_NAME}" \
+              --title "${RELEASE_NAME}" \
               --notes-file "${notes_file}" \
-              --latest \
+              --prerelease \
               --target "${GITHUB_SHA}"
           fi

@@ -88,7 +88,7 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
     implementation 'androidx.compose.runtime:runtime-livedata:1.5.4'
     
-    // OSMdroid для карт
+
     implementation 'org.osmdroid:osmdroid-android:6.1.17'
     
     testImplementation libs.junit

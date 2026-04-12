@@ -40,7 +40,7 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
     private fun observeDevicesUpdates() {
         viewModelScope.launch {
             repository.devices.collect { devices ->
-                // Сортируем устройства по времени последнего обнаружения (свежие сверху)
+
                 val sortedDevices = devices.sortedByDescending { it.lastSeen }
                 _uiState.value = _uiState.value.copy(
                     devices = sortedDevices,
@@ -53,8 +53,8 @@ class DevicesViewModel(application: Application) : AndroidViewModel(application)
     private fun startPeriodicRefresh() {
         viewModelScope.launch {
             while (true) {
-                delay(2000) // Обновляем каждые 2 секунды
-                // Обновляем устройства только если сканер работает
+                delay(2000)
+
                 if (isServiceRunning(BleScannerService::class.java)) {
                     repository.refreshDevices()
                 }

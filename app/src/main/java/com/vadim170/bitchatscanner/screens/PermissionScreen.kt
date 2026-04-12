@@ -22,10 +22,7 @@ import com.vadim170.bitchatscanner.R
 import com.vadim170.bitchatscanner.components.PermissionCard
 
 /**
- * Экран запроса разрешений
- * Показывается при первом запуске или когда отсутствуют необходимые разрешения
  * 
- * @param onGrantAll Callback для запроса всех разрешений
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,7 +49,7 @@ fun PermissionScreen(onGrantAll: () -> Unit) {
                 )
             }
 
-            // Bluetooth разрешения
+
             item {
                 PermissionCard(
                     title = stringResource(R.string.permission_bluetooth_title),
@@ -60,7 +57,7 @@ fun PermissionScreen(onGrantAll: () -> Unit) {
                 )
             }
             
-            // Разрешение на локацию
+
             item {
                 PermissionCard(
                     title = stringResource(R.string.permission_location_title),
@@ -68,7 +65,7 @@ fun PermissionScreen(onGrantAll: () -> Unit) {
                 )
             }
             
-            // Разрешение на уведомления (только для Android 13+)
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 item {
                     PermissionCard(

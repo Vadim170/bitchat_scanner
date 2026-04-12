@@ -73,7 +73,7 @@ class BleScannerService : Service() {
         val record = r.scanRecord ?: return
         val svc = ParcelUuid(BitchatBle.SERVICE_UUID)
 
-        // Учитываем все варианты: Service UUID list, Service Data keys, Service Solicitation UUIDs
+
         val matches =
             (record.serviceUuids?.contains(svc) == true) ||
                     (record.serviceData?.keys?.any { it.uuid == BitchatBle.SERVICE_UUID } == true) ||
@@ -95,7 +95,7 @@ class BleScannerService : Service() {
         val acc = loc?.accuracy
         val provider = loc?.provider
 
-        // Сохраняем в БД (и подрезаем историю до 1000)
+
         io.execute {
             try {
                 db.insertAndPrune(
@@ -116,7 +116,7 @@ class BleScannerService : Service() {
             }
         }
 
-        // Отправим строку для UI-логов
+
         val lineHuman = buildString {
             append(sdf.format(Date(nowMs)))
             append(",")
@@ -143,7 +143,7 @@ class BleScannerService : Service() {
             ServiceCompat.startForeground(
                 this,
                 1,
-                baseNotif("Сканирование BLE…"),
+                baseNotif("BLE scanning..."),
                 types
             )
 
@@ -183,7 +183,7 @@ class BleScannerService : Service() {
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        // Без фильтров — отфильтруем в handleResult()
+
         scanner.startScan(callback)
         sendLine("${sdf.format(Date())},scan_started")
         sendBroadcast(Intent(ACTION_SCANNER_STARTED))
@@ -201,7 +201,7 @@ class BleScannerService : Service() {
 
     private fun sendLine(line: String) {
         sendBroadcast(Intent(ACTION_LOG_LINE).putExtra(EXTRA_LINE, line))
-        // Логируем только ключевые события, чтобы не зашумлять logcat.
+
         if (line.contains("scan_failed") || line.contains("bluetooth_disabled") || 
             line.contains("no_scan_permission") || line.contains("scan_started") || 
             line.contains("scan_stopped")) {
@@ -215,7 +215,7 @@ class BleScannerService : Service() {
         val text = "${name ?: addr} (RSSI $rssi)"
         val n = NotificationCompat.Builder(this, CH_ID)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("Обнаружен узел BitChat")
+            .setContentTitle("BitChat node detected")
             .setContentText(text)
             .setContentIntent(notifyIntent)
             .setAutoCancel(true)
@@ -244,7 +244,6 @@ class BleScannerService : Service() {
         ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) ==
                 PackageManager.PERMISSION_GRANTED
 
-    /** Возвращает «лучшую» lastKnown локацию (если есть разрешение), иначе null. */
     private fun getBestLastKnownLocation(): Location? {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
             != PackageManager.PERMISSION_GRANTED

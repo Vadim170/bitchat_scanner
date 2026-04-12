@@ -45,11 +45,7 @@ import com.vadim170.bitchatscanner.viewmodel.DevicesViewModel
 import com.vadim170.bitchatscanner.viewmodel.MainViewModel
 
 /**
- * Главный экран приложения
- * Отображает список обнаруженных устройств и управление сканером
  * 
- * @param onNavigateToLogs Переход к экрану логов
- * @param onNavigateToMap Переход к экрану общей карты
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,7 +61,7 @@ fun MainScreen(
     
     var showDropdownMenu by remember { mutableStateOf(false) }
 
-    // Лаунчер для повторного запроса разрешений (если потребуется)
+
     val requestPermsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { /* no-op */ }
@@ -75,7 +71,7 @@ fun MainScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
                 actions = {
-                    // Кнопка карты
+
                     IconButton(onClick = onNavigateToMap) {
                         Icon(
                             Icons.Default.LocationOn, 
@@ -83,7 +79,7 @@ fun MainScreen(
                         )
                     }
                     
-                    // Меню
+
                     IconButton(onClick = { showDropdownMenu = true }) {
                         Icon(
                             Icons.Default.MoreVert, 
@@ -114,7 +110,7 @@ fun MainScreen(
                 .padding(horizontal = 8.dp)
                 .fillMaxSize()
         ) {
-            // Управление сканером
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -132,7 +128,7 @@ fun MainScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // Переключатель уведомлений
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -149,7 +145,7 @@ fun MainScreen(
 
             Spacer(Modifier.height(16.dp))
 
-            // Список устройств
+
             when {
                 devicesUiState.isLoading -> {
                     Text(
@@ -170,7 +166,7 @@ fun MainScreen(
                 else -> {
                     val listState = rememberLazyListState()
                     
-                    // Отслеживаем видимые элементы для оптимизации загрузки карт
+
                     val visibleKeys by remember(listState) {
                         derivedStateOf {
                             listState.layoutInfo.visibleItemsInfo

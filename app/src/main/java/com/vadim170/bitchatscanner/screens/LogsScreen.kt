@@ -29,10 +29,7 @@ import com.vadim170.bitchatscanner.viewmodel.MainViewModel
 import androidx.compose.material3.MaterialTheme
 
 /**
- * Экран логов обнаружений
- * Показывает детальную историю всех событий сканирования
  * 
- * @param onNavigateBack Возврат на предыдущий экран
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,7 +76,7 @@ fun LogsScreen(onNavigateBack: () -> Unit) {
         }
     }
 
-    // Диалог подтверждения очистки лога
+
     if (uiState.showClearDialog) {
         AlertDialog(
             onDismissRequest = { viewModel.hideClearDialog() },

@@ -108,9 +108,9 @@ class DetectionDbHelper(ctx: Context) :
             )
         }
         if (oldVersion < 3) {
-            // Добавляем колонку first_seen
+
             db.execSQL("ALTER TABLE $DEVICES_TABLE ADD COLUMN first_seen INTEGER NOT NULL DEFAULT 0")
-            // Устанавливаем first_seen равным last_seen для существующих записей
+
             db.execSQL("UPDATE $DEVICES_TABLE SET first_seen = last_seen WHERE first_seen = 0")
         }
     }
@@ -118,7 +118,7 @@ class DetectionDbHelper(ctx: Context) :
     fun insertAndPrune(row: DetectionRow) {
         writableDatabase.beginTransaction()
         try {
-            // Вставляем в основную таблицу
+
             val cv = ContentValues().apply {
                 put("timestamp", row.timestamp)
                 put("address", row.address)
@@ -132,7 +132,7 @@ class DetectionDbHelper(ctx: Context) :
             }
             writableDatabase.insert(TABLE, null, cv)
 
-            // Обновляем таблицу устройств
+
             val deviceCv = ContentValues().apply {
                 put("address", row.address)
                 put("name", row.name)
@@ -145,7 +145,7 @@ class DetectionDbHelper(ctx: Context) :
                 put("service_data_hex", row.serviceDataHex)
             }
             
-            // Используем INSERT OR REPLACE и увеличиваем счетчик
+
             writableDatabase.execSQL(
                 """
                 INSERT OR REPLACE INTO $DEVICES_TABLE 
@@ -162,7 +162,7 @@ class DetectionDbHelper(ctx: Context) :
                 )
             )
 
-            // Удаляем старые записи из основной таблицы
+
             writableDatabase.execSQL(
                 """
                 DELETE FROM $TABLE
@@ -179,7 +179,6 @@ class DetectionDbHelper(ctx: Context) :
         }
     }
 
-    /** Возвращает последние N записей, отсортированные по убыванию времени. */
     fun latest(limit: Int = MAX_ROWS): List<DetectionRow> {
         val res = mutableListOf<DetectionRow>()
         readableDatabase.rawQuery(
@@ -210,13 +209,11 @@ class DetectionDbHelper(ctx: Context) :
         return res
     }
 
-    /** Очищает все записи из базы данных. */
     fun clearAll() {
         writableDatabase.delete(TABLE, null, null)
         writableDatabase.delete(DEVICES_TABLE, null, null)
     }
 
-    /** Возвращает все обнаруженные устройства, отсортированные по времени последнего обнаружения. */
     fun getAllDevices(): List<DeviceSummary> {
         val res = mutableListOf<DeviceSummary>()
         readableDatabase.rawQuery(
@@ -248,7 +245,6 @@ class DetectionDbHelper(ctx: Context) :
         return res
     }
 
-    /** Возвращает устройства, обнаруженные за последний час. */
     fun getRecentDevices(hoursBack: Int = 1): List<DeviceSummary> {
         val cutoffTime = System.currentTimeMillis() - (hoursBack * 60 * 60 * 1000)
         val res = mutableListOf<DeviceSummary>()
@@ -282,7 +278,6 @@ class DetectionDbHelper(ctx: Context) :
         return res
     }
     
-    /** Возвращает все координаты обнаружений для конкретного устройства с RSSI и точностью. */
     fun getDeviceLocations(deviceAddress: String): List<LocationPoint> {
         val locations = mutableListOf<LocationPoint>()
         readableDatabase.rawQuery(

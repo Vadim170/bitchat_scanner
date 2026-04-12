@@ -28,13 +28,7 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.views.MapView
 
 /**
- * Компонент для отображения мини-карты с локациями устройства
  * 
- * @param locations Список локаций для отображения
- * @param modifier Модификатор для настройки размера и стиля
- * @param isVisible Флаг видимости карты (для оптимизации)
- * @param isLoading Флаг загрузки данных
- * @param hasError Флаг ошибки загрузки
  */
 @Composable
 fun DeviceMapView(
@@ -121,7 +115,7 @@ fun DeviceMapView(
                         mapViewHolder.value = this
                         setTileSource(TileSourceFactory.MAPNIK)
 
-                        // Отключаем интерактивность для мини-карты
+
                         setMultiTouchControls(false)
                         setFlingEnabled(false)
                         isClickable = false
@@ -146,17 +140,15 @@ fun DeviceMapView(
 }
 
 /**
- * Обновляет содержимое карты с учётом кэширования
- * Карта перерисовывается только если изменились координаты или уменьшилась минимальная сумма радиусов
  */
 private fun updateMapContent(mapView: MapView, locations: List<LocationPoint>) {
-    // Сравниваем с предыдущим состоянием
+
     val oldData = mapView.tag as? MapData
     val newData = calculateMapData(locations)
     
-    // Проверяем, нужна ли перерисовка
+
     if (oldData != null && !shouldRedraw(oldData, newData)) {
-        return // Изменений нет или радиус не уменьшился
+        return
     }
 
     mapView.tag = newData
@@ -170,7 +162,7 @@ private fun updateMapContent(mapView: MapView, locations: List<LocationPoint>) {
     val filteredLocations = MapUtils.filterLocationsByMinRadius(locations)
     val controller = mapView.controller
     
-    // Устанавливаем центр и зум
+
     if (filteredLocations.size == 1) {
         val center = MapUtils.calculateCenter(filteredLocations)
         controller.setCenter(center)
@@ -182,7 +174,7 @@ private fun updateMapContent(mapView: MapView, locations: List<LocationPoint>) {
         }
     }
 
-    // Добавляем круги на карту
+
     filteredLocations.forEach { location ->
         val circle = MapUtils.createDetectionCircle(location, MapConstants.CIRCLE_POINTS_COUNT_SIMPLE)
         mapView.overlays.add(circle)
@@ -192,33 +184,31 @@ private fun updateMapContent(mapView: MapView, locations: List<LocationPoint>) {
 }
 
 /**
- * Данные для кэширования состояния карты
  */
 private data class MapData(
-    val coordsHash: Int,  // Хеш координат
-    val minRadiusByCoords: Map<String, Double>  // Минимальная сумма радиусов для каждой координаты
+    val coordsHash: Int,
+    val minRadiusByCoords: Map<String, Double>
 )
 
 /**
- * Вычисляет данные карты: хеш координат и минимальные суммы радиусов
  */
 private fun calculateMapData(locations: List<LocationPoint>): MapData {
     if (locations.isEmpty()) {
         return MapData(0, emptyMap())
     }
     
-    // Группируем по координатам
+
     val groupedByCoords = locations.groupBy { "${it.lat},${it.lon}" }
     
-    // Хешируем только координаты (не радиусы)
+
     val coordsHash = groupedByCoords.keys.sorted().hashCode()
     
-    // Для каждой координаты находим минимальную сумму радиусов
+
     val minRadiusByCoords = groupedByCoords.mapValues { (_, points) ->
         points.minOf { point ->
             val rssiRadius = com.vadim170.bitchatscanner.utils.RssiUtils.calculateRadiusFromRSSI(point.rssi)
             val gpsAccuracy = point.accuracy?.toDouble() ?: 10.0
-            normalizeRadius(rssiRadius + gpsAccuracy)  // СУММА радиусов с нормализацией
+            normalizeRadius(rssiRadius + gpsAccuracy)
         }
     }
     
@@ -226,22 +216,18 @@ private fun calculateMapData(locations: List<LocationPoint>): MapData {
 }
 
 /**
- * Проверяет, нужна ли перерисовка карты
- * Возвращает true если:
- * - Изменились координаты (появились новые или исчезли старые)
- * - Для любой координаты минимальная сумма радиусов уменьшилась
  */
 private fun shouldRedraw(oldData: MapData, newData: MapData): Boolean {
-    // Если изменились координаты - перерисовываем
+
     if (oldData.coordsHash != newData.coordsHash) {
         return true
     }
     
-    // Проверяем, уменьшилась ли минимальная сумма для каких-либо координат
+
     for ((coords, newMinRadius) in newData.minRadiusByCoords) {
         val oldMinRadius = oldData.minRadiusByCoords[coords] ?: Double.MAX_VALUE
         
-        // Если сумма уменьшилась - нужна перерисовка
+
         if (newMinRadius + MapConstants.MIN_RADIUS_IMPROVEMENT_METERS <= oldMinRadius) {
             return true
         }
@@ -251,7 +237,6 @@ private fun shouldRedraw(oldData: MapData, newData: MapData): Boolean {
 }
 
 /**
- * Нормализует радиус с шагом 0.1 м, чтобы избежать шумовых перерисовок
  */
 private fun normalizeRadius(radius: Double): Double {
     val scale = MapConstants.RADIUS_NORMALIZATION_SCALE

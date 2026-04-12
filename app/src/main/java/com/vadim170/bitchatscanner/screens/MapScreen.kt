@@ -36,10 +36,7 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.views.MapView
 
 /**
- * Экран полной карты всех обнаружений
- * Показывает все точки обнаружения всех устройств на одной интерактивной карте
  * 
- * @param onNavigateBack Возврат на предыдущий экран
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,17 +45,17 @@ fun MapScreen(onNavigateBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var allLocations by remember { mutableStateOf<List<LocationPoint>>(emptyList()) }
     
-    // Инициализируем OSMdroid configuration
+
     LaunchedEffect(Unit) {
         Configuration.getInstance().userAgentValue = context.packageName
     }
     
-    // Загружаем все координаты обнаружений
+
     LaunchedEffect(Unit) {
         val repository = ScannerRepository.getInstance(context)
         repository.loadDevices()
         
-        // Собираем локации со всех устройств
+
         repository.devices.collect { devices ->
             val allDeviceLocations = mutableListOf<LocationPoint>()
             
@@ -93,7 +90,7 @@ fun MapScreen(onNavigateBack: () -> Unit) {
                 .fillMaxSize()
         ) {
             if (allLocations.isNotEmpty()) {
-                // Интерактивная карта
+
                 AndroidView(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -106,7 +103,7 @@ fun MapScreen(onNavigateBack: () -> Unit) {
                     }
                 )
                 
-                // Информация о количестве точек (после фильтрации дубликатов)
+
                 val filteredCount = MapUtils.filterLocationsByMinRadius(allLocations).size
                 Text(
                     text = stringResource(R.string.total_detections, filteredCount),
@@ -114,7 +111,7 @@ fun MapScreen(onNavigateBack: () -> Unit) {
                     modifier = Modifier.padding(16.dp)
                 )
             } else {
-                // Сообщение если нет данных
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -132,20 +129,19 @@ fun MapScreen(onNavigateBack: () -> Unit) {
 }
 
 /**
- * Создаёт полноэкранную интерактивную карту
  */
 private fun createFullScreenMap(context: android.content.Context, locations: List<LocationPoint>): MapView {
     return MapView(context).apply {
         setTileSource(TileSourceFactory.MAPNIK)
         
-        // Включаем все интерактивные функции
+
         setMultiTouchControls(true)
         setFlingEnabled(true)
         isClickable = true
         isFocusable = true
         isFocusableInTouchMode = true
         
-        // Показываем zoom controls
+
         zoomController.setVisibility(
             org.osmdroid.views.CustomZoomButtonsController.Visibility.SHOW_AND_FADEOUT
         )
@@ -156,7 +152,6 @@ private fun createFullScreenMap(context: android.content.Context, locations: Lis
 }
 
 /**
- * Обновляет полноэкранную карту
  */
 private fun updateFullScreenMap(mapView: MapView, locations: List<LocationPoint>) {
     mapView.overlays.clear()
@@ -165,7 +160,6 @@ private fun updateFullScreenMap(mapView: MapView, locations: List<LocationPoint>
 }
 
 /**
- * Настраивает область просмотра карты
  */
 private fun setupMapViewport(mapView: MapView, locations: List<LocationPoint>) {
     val mapController = mapView.controller
@@ -187,7 +181,6 @@ private fun setupMapViewport(mapView: MapView, locations: List<LocationPoint>) {
 }
 
 /**
- * Рисует круги обнаружений на карте
  */
 private fun drawDetectionCircles(mapView: MapView, locations: List<LocationPoint>) {
     val filteredLocations = MapUtils.filterLocationsByMinRadius(locations)

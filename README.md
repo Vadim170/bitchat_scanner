@@ -1,22 +1,22 @@
 # BitChat Scanner
 
-Android-приложение для BLE-сканирования устройств BitChat и отображения истории обнаружений на карте.
+Android app for BLE scanning of BitChat devices with local detection history and map visualization.
 
-## Публичная версия репозитория
+## Public Repository Notes
 
-В публичный репозиторий не включаются локальные IDE-файлы и приватные сервисные конфиги, включая:
+The public repository intentionally excludes local IDE files and private service configuration:
 
 - `.idea/`
 - `local.properties`
 - `app/google-services.json`
 
-Если вам нужен собственный Firebase-проект для локальной разработки, добавьте `app/google-services.json` только у себя локально. В публичной версии репозитория Firebase не требуется.
+If you want to experiment with your own Firebase project locally, keep `app/google-services.json` only on your machine. The public repository does not require Firebase to build.
 
 ## GitHub Releases
 
-Workflow релиза публикует APK только по тегам вида `v*` или при ручном запуске.
+The release workflow publishes a signed APK on every push to `main` and `master`, plus manual runs.
 
-Для подписанного release APK в настройках GitHub Actions нужны secrets:
+Required GitHub Actions secrets:
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`

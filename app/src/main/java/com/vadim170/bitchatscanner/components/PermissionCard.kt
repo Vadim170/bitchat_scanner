@@ -13,10 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /**
- * Карточка с описанием разрешения
  * 
- * @param title Заголовок разрешения
- * @param subtitle Описание для чего нужно разрешение
  */
 @Composable
 fun PermissionCard(title: String, subtitle: String) {

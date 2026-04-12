@@ -35,23 +35,20 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Карточка отображения информации об обнаруженном устройстве
  * 
- * @param device Данные об устройстве
- * @param showMap Показывать ли карту (для оптимизации при прокрутке)
  */
 @Composable
 fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
     val context = LocalContext.current
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US) }
 
-    // Состояния для загрузки локаций
+
     var locations by remember(device.address) { mutableStateOf<List<LocationPoint>>(emptyList()) }
     var isLoadingLocations by remember(device.address) { mutableStateOf(false) }
     var lastLoadedTimestamp by remember(device.address) { mutableStateOf<Long?>(null) }
     var locationLoadError by remember(device.address) { mutableStateOf<Throwable?>(null) }
 
-    // Загружаем координаты только когда карточка видима и есть новые данные
+
     LaunchedEffect(device.address, showMap, device.lastSeen) {
         if (showMap && !isLoadingLocations && lastLoadedTimestamp != device.lastSeen) {
             isLoadingLocations = true
@@ -61,7 +58,7 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
                     ScannerRepository.getInstance(context).getDeviceLocations(device.address)
                 }
                 
-                // Проверяем, изменились ли координаты или уменьшился радиус
+
                 val hasChanges = locationsHaveChanged(locations, deviceLocations)
                 
                 if (hasChanges) {
@@ -76,14 +73,14 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
         }
     }
 
-    // Определяем, было ли устройство обнаружено недавно
+
     val isRecentlyDetected = System.currentTimeMillis() - device.lastSeen < MapConstants.RECENT_DETECTION_THRESHOLD_MS
 
-    // Выбираем цвет карточки
+
     val cardColor = if (isRecentlyDetected) {
-        MaterialTheme.colorScheme.tertiaryContainer // Зеленоватый для недавних
+        MaterialTheme.colorScheme.tertiaryContainer
     } else {
-        MaterialTheme.colorScheme.surfaceVariant // Обычный серый
+        MaterialTheme.colorScheme.surfaceVariant
     }
 
     Card(
@@ -91,13 +88,13 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
         colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // MAC-адрес устройства
+
             Text(
                 text = device.address,
                 style = MaterialTheme.typography.titleMedium
             )
 
-            // Имя устройства (если есть)
+
             if (!device.name.isNullOrEmpty()) {
                 Text(
                     text = stringResource(R.string.device_name, device.name),
@@ -105,7 +102,7 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
                 )
             }
 
-            // Временные метки
+
             Text(
                 text = stringResource(R.string.last_detection, sdf.format(Date(device.lastSeen))),
                 style = MaterialTheme.typography.bodySmall
@@ -115,7 +112,7 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
                 style = MaterialTheme.typography.bodySmall
             )
 
-            // Данные о сигнале
+
             Text(
                 text = stringResource(R.string.rssi, device.rssi),
                 style = MaterialTheme.typography.bodySmall
@@ -125,7 +122,7 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
                 style = MaterialTheme.typography.bodySmall
             )
 
-            // Service data (если есть)
+
             if (!device.serviceDataHex.isNullOrEmpty()) {
                 Text(
                     text = stringResource(
@@ -136,7 +133,7 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
                 )
             }
 
-            // Карта (если есть координаты)
+
             if (device.lat != null && device.lon != null) {
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -153,7 +150,7 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
 
                 if (showMap && locations.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    // Показываем количество уникальных точек (после фильтрации дубликатов)
+
                     val filteredCount = MapUtils.filterLocationsByMinRadius(locations).size
                     Text(
                         text = stringResource(R.string.points_count, filteredCount),
@@ -166,61 +163,57 @@ fun DeviceCard(device: DeviceSummary, showMap: Boolean) {
 }
 
 /**
- * Проверяет, изменились ли координаты или уменьшился радиус для существующих точек
  * 
- * @param oldLocations Предыдущий список локаций
- * @param newLocations Новый список локаций
- * @return true если есть изменения, требующие перерисовки карты
  */
 private fun locationsHaveChanged(
     oldLocations: List<LocationPoint>,
     newLocations: List<LocationPoint>
 ): Boolean {
-    // Если количество изменилось - точно есть изменения
+
     if (oldLocations.size != newLocations.size) {
         return true
     }
     
-    // Если старый список пустой, а новый нет - есть изменения
+
     if (oldLocations.isEmpty() && newLocations.isNotEmpty()) {
         return true
     }
     
-    // Если оба пустые - нет изменений
+
     if (oldLocations.isEmpty() && newLocations.isEmpty()) {
         return false
     }
     
-    // Группируем точки по координатам для сравнения
+
     val oldByCoords = oldLocations.groupBy { "${it.lat},${it.lon}" }
     val newByCoords = newLocations.groupBy { "${it.lat},${it.lon}" }
     
-    // Если появились новые координаты
+
     if (newByCoords.keys != oldByCoords.keys) {
         return true
     }
     
-    // Проверяем, уменьшилась ли СУММА радиусов для существующих координат
+
     for ((coords, newPoints) in newByCoords) {
         val oldPoints = oldByCoords[coords] ?: continue
         
-        // Вычисляем минимальную СУММУ радиусов для старых точек
+
         val oldMinRadius = oldPoints.minOfOrNull { point ->
             calculateNormalizedRadius(point)
         } ?: Double.MAX_VALUE
         
-        // Вычисляем минимальную СУММУ радиусов для новых точек
+
         val newMinRadius = newPoints.minOfOrNull { point ->
             calculateNormalizedRadius(point)
         } ?: Double.MAX_VALUE
         
-        // Если сумма радиусов уменьшилась - нужно перерисовать
+
         if (newMinRadius + MapConstants.MIN_RADIUS_IMPROVEMENT_METERS <= oldMinRadius) {
             return true
         }
     }
     
-    // Изменений не обнаружено
+
     return false
 }
 

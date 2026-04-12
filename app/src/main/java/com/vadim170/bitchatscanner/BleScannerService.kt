@@ -143,7 +143,7 @@ class BleScannerService : Service() {
             ServiceCompat.startForeground(
                 this,
                 1,
-                baseNotif("BLE scanning..."),
+                baseNotif(getString(R.string.notification_scanning)),
                 types
             )
 
@@ -215,7 +215,7 @@ class BleScannerService : Service() {
         val text = "${name ?: addr} (RSSI $rssi)"
         val n = NotificationCompat.Builder(this, CH_ID)
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-            .setContentTitle("BitChat node detected")
+            .setContentTitle(getString(R.string.notification_node_detected))
             .setContentText(text)
             .setContentIntent(notifyIntent)
             .setAutoCancel(true)
@@ -226,7 +226,7 @@ class BleScannerService : Service() {
 
     private fun baseNotif(text: String) = NotificationCompat.Builder(this, CH_ID)
         .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-        .setContentTitle("BitChat Scanner")
+        .setContentTitle(getString(R.string.app_name))
         .setContentText(text)
         .setContentIntent(notifyIntent)
         .build()

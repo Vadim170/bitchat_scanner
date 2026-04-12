@@ -33,6 +33,8 @@
     <string name="no_coordinates">No coordinate data for this device</string>
     <string name="map_hidden_placeholder">Map will appear once the card is on screen</string>
     <string name="map_load_error">Failed to load map</string>
+    <string name="notification_scanning">BLE scanning...</string>
+    <string name="notification_node_detected">BitChat node detected</string>
     
     <!-- Logs Screen -->
     <string name="detection_log">Detection Log</string>

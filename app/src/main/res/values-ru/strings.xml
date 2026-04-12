@@ -1,0 +1,52 @@
+<resources>
+    <string name="app_name">BitChat Scanner</string>
+
+    <!-- Permission Screen -->
+    <string name="permissions_title">BitChat Scanner — разрешения</string>
+    <string name="permissions_description">Чтобы сканировать узлы и строить карту покрытия, нужны следующие разрешения:</string>
+    <string name="permission_bluetooth_title">Bluetooth (сканирование и подключение)</string>
+    <string name="permission_bluetooth_subtitle">Нужно, чтобы искать устройства BitChat по BLE-сервису.</string>
+    <string name="permission_location_title">Геопозиция (точная)</string>
+    <string name="permission_location_subtitle">Нужна для привязки обнаружений к координатам и построения карты покрытия сети.</string>
+    <string name="permission_notifications_title">Уведомления</string>
+    <string name="permission_notifications_subtitle">Необязательно. Нужны только если хотите получать уведомления о новых узлах.</string>
+    <string name="grant_permissions">Выдать разрешения</string>
+    <string name="privacy_notice">Мы не отправляем координаты никуда — всё хранится локально в приложении.</string>
+
+    <!-- Main Screen -->
+    <string name="menu">Меню</string>
+    <string name="map">Карта</string>
+    <string name="stop_scanner">Стоп сканера</string>
+    <string name="start_scanner">Старт сканера</string>
+    <string name="notify_detections">Уведомлять об обнаружениях</string>
+    <string name="loading">Загрузка...</string>
+    <string name="no_devices_found">Устройства не найдены</string>
+
+    <!-- Device Card -->
+    <string name="device_name">Имя: %1$s</string>
+    <string name="last_detection">Последнее обнаружение: %1$s</string>
+    <string name="first_detection">Первое обнаружение: %1$s</string>
+    <string name="rssi">RSSI: %1$d dBm</string>
+    <string name="detection_count">Обнаружений: %1$d</string>
+    <string name="service_data">Данные сервиса: %1$s</string>
+    <string name="points_count">Точек: %1$d</string>
+    <string name="no_coordinates">Нет данных о координатах для этого устройства</string>
+    <string name="map_hidden_placeholder">Карта появится, когда карточка станет видимой на экране</string>
+    <string name="map_load_error">Не удалось загрузить карту</string>
+    <string name="notification_scanning">Сканирование BLE...</string>
+    <string name="notification_node_detected">Обнаружен узел BitChat</string>
+
+    <!-- Logs Screen -->
+    <string name="detection_log">Журнал обнаружений</string>
+    <string name="back">Назад</string>
+    <string name="clear">Очистить</string>
+
+    <!-- Map Screen -->
+    <string name="all_detections_map">Карта всех обнаружений</string>
+    <string name="total_detections">Всего обнаружений: %1$d</string>
+
+    <!-- Clear Dialog -->
+    <string name="confirmation">Подтверждение</string>
+    <string name="clear_log_message">Вы уверены, что хотите очистить весь журнал обнаружений? Это действие нельзя отменить.</string>
+    <string name="cancel">Отмена</string>
+</resources>

@@ -2,11 +2,23 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    // Add the Google services Gradle plugin
-    id 'com.google.gms.google-services'
-    // Add the Crashlytics Gradle plugin
-    id 'com.google.firebase.crashlytics'
 }
+
+def readEnv = { String name ->
+    def value = System.getenv(name)
+    return value != null && !value.trim().isEmpty() ? value : null
+}
+
+def releaseKeystorePath = readEnv('ANDROID_KEYSTORE_PATH')
+def releaseKeystorePassword = readEnv('ANDROID_KEYSTORE_PASSWORD')
+def releaseKeyAlias = readEnv('ANDROID_KEY_ALIAS')
+def releaseKeyPassword = readEnv('ANDROID_KEY_PASSWORD')
+def hasReleaseSigning = [
+    releaseKeystorePath,
+    releaseKeystorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+].every { it != null }
 
 android {
     namespace 'com.vadim170.bitchatscanner'
@@ -29,8 +41,22 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseKeystorePath)
+                storePassword releaseKeystorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -64,15 +90,6 @@ dependencies {
     
     // OSMdroid для карт
     implementation 'org.osmdroid:osmdroid-android:6.1.17'
-    
-    // Import the Firebase BoM
-    implementation platform('com.google.firebase:firebase-bom:34.5.0')
-    
-    // Firebase Analytics
-    implementation 'com.google.firebase:firebase-analytics'
-    
-    // Firebase Crashlytics
-    implementation 'com.google.firebase:firebase-crashlytics'
     
     testImplementation libs.junit
     androidTestImplementation libs.androidx.junit

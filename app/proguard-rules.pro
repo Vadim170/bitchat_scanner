@@ -20,15 +20,10 @@
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
 
-# Firebase Crashlytics
+# Keep runtime annotations and line numbers for debugging.
 -keepattributes *Annotation*
 -keepattributes SourceFile,LineNumberTable
 -keep public class * extends java.lang.Exception
--keep class com.google.firebase.crashlytics.** { *; }
--dontwarn com.google.firebase.crashlytics.**
-
-# Keep Crashlytics mapping file
--keepattributes SourceFile,LineNumberTable
 
 # Compose
 -keep class androidx.compose.** { *; }

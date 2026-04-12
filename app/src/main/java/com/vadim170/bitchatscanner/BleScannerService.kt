@@ -18,11 +18,11 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import android.os.ParcelUuid
+import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.google.firebase.crashlytics.FirebaseCrashlytics
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -31,6 +31,7 @@ import java.util.concurrent.Executors
 class BleScannerService : Service() {
 
     companion object {
+        private const val TAG = "BleScannerService"
         const val ACTION_LOG_LINE = "com.vadim170.bitchatscanner.LOG_LINE"
         const val ACTION_SCANNER_STARTED = "com.vadim170.bitchatscanner.SCANNER_STARTED"
         const val ACTION_SCANNER_STOPPED = "com.vadim170.bitchatscanner.SCANNER_STOPPED"
@@ -63,7 +64,7 @@ class BleScannerService : Service() {
         override fun onScanFailed(errorCode: Int) {
             val errorMsg = "${sdf.format(Date())},scan_failed,$errorCode"
             sendLine(errorMsg)
-            FirebaseCrashlytics.getInstance().log("BLE Scan Failed: errorCode=$errorCode")
+            Log.w(TAG, "BLE scan failed: errorCode=$errorCode")
         }
     }
 
@@ -111,8 +112,7 @@ class BleScannerService : Service() {
                     )
                 )
             } catch (e: Exception) {
-                FirebaseCrashlytics.getInstance().log("Error saving detection to DB: $addr")
-                FirebaseCrashlytics.getInstance().recordException(e)
+                Log.e(TAG, "Error saving detection to DB: $addr", e)
             }
         }
 
@@ -147,16 +147,16 @@ class BleScannerService : Service() {
                 types
             )
 
-            FirebaseCrashlytics.getInstance().log("BleScannerService onCreate: service started")
+            Log.i(TAG, "Service started")
 
             if (!hasScanPermission()) {
                 sendLine("${sdf.format(Date())},no_scan_permission")
-                FirebaseCrashlytics.getInstance().log("BleScannerService: No scan permission")
+                Log.w(TAG, "No scan permission")
                 return
             }
             startScan()
         } catch (e: Exception) {
-            FirebaseCrashlytics.getInstance().recordException(e)
+            Log.e(TAG, "Service startup failed", e)
             throw e
         }
     }
@@ -201,11 +201,11 @@ class BleScannerService : Service() {
 
     private fun sendLine(line: String) {
         sendBroadcast(Intent(ACTION_LOG_LINE).putExtra(EXTRA_LINE, line))
-        // Логируем важные события в Crashlytics
+        // Логируем только ключевые события, чтобы не зашумлять logcat.
         if (line.contains("scan_failed") || line.contains("bluetooth_disabled") || 
             line.contains("no_scan_permission") || line.contains("scan_started") || 
             line.contains("scan_stopped")) {
-            FirebaseCrashlytics.getInstance().log(line)
+            Log.i(TAG, line)
         }
     }
 

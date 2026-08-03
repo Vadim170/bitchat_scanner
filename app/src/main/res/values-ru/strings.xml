@@ -6,19 +6,33 @@
     <string name="permissions_description">Чтобы сканировать узлы и строить карту покрытия, нужны следующие разрешения:</string>
     <string name="permission_bluetooth_title">Bluetooth (сканирование и подключение)</string>
     <string name="permission_bluetooth_subtitle">Нужно, чтобы искать устройства BitChat по BLE-сервису.</string>
-    <string name="permission_location_title">Геопозиция (точная)</string>
-    <string name="permission_location_subtitle">Нужна для привязки обнаружений к координатам и построения карты покрытия сети.</string>
-    <string name="permission_notifications_title">Уведомления</string>
-    <string name="permission_notifications_subtitle">Необязательно. Нужны только если хотите получать уведомления о новых узлах.</string>
+    <string name="permission_location_title">Геопозиция (примерная + точная)</string>
+    <string name="permission_location_subtitle">Нужна для BLE-сканирования на Android 11 и ниже. На Android 12+ необязательна и только добавляет координаты к обнаружениям на переднем плане.</string>
     <string name="grant_permissions">Выдать разрешения</string>
-    <string name="privacy_notice">Мы не отправляем координаты никуда — всё хранится локально в приложении.</string>
+    <string name="privacy_notice">История обнаружений хранится локально в приложении и не загружается на сервер приложения. При открытии карты для видимой области загружаются тайлы OpenStreetMap.</string>
 
     <!-- Main Screen -->
     <string name="menu">Меню</string>
     <string name="map">Карта</string>
     <string name="stop_scanner">Стоп сканера</string>
     <string name="start_scanner">Старт сканера</string>
-    <string name="notify_detections">Уведомлять об обнаружениях</string>
+    <string name="scan_visibility_note">Когда приложение видно, используется быстрый callback. После ухода Android сохраняет отфильтрованную BLE-подписку PendingIntent в режиме best effort. Система может ограничивать её, задерживать или пропускать объявления; фоновое сканирование не непрерывно и не гарантируется.</string>
+    <string name="scan_state_visible">Активное сканирование (приложение видно)</string>
+    <string name="scan_state_background">Пассивная фоновая подписка активна</string>
+    <string name="scan_state_stopped">Сканер остановлен</string>
+    <string name="scan_state_permission_required">Нет разрешения Bluetooth или точной геопозиции</string>
+    <string name="scan_state_bluetooth_disabled">Bluetooth выключен</string>
+    <string name="scan_state_unavailable">BLE-сканер недоступен</string>
+    <string name="scan_state_error">Ошибка сканера — нажмите «Старт» для повтора</string>
+    <string name="location_optional_title">Добавить точные координаты</string>
+    <string name="location_optional_subtitle">На Android 12+ необязательно: сканирование и фоновые уведомления работают без геопозиции. Выдайте доступ к примерной + точной геопозиции, чтобы добавлять координаты к обнаружениям на переднем плане.</string>
+    <string name="grant_location">Выдать геопозицию</string>
+    <string name="notifications_title">Уведомления об обнаружениях</string>
+    <string name="notifications_subtitle">Уведомлять о подходящих объявлениях BitChat (с паузой). На Android 13+ появится запрос разрешения; отказ отключит уведомления, но не остановит сканирование.</string>
+    <string name="notification_channel_name">Обнаружения BitChat</string>
+    <string name="notification_channel_description">Уведомления при обнаружении объявления BitChat.</string>
+    <string name="notification_detection_title">Обнаружено устройство BitChat</string>
+    <string name="notification_detection_body">%1$s · RSSI %2$d дБм</string>
     <string name="loading">Загрузка...</string>
     <string name="no_devices_found">Устройства не найдены</string>
 
@@ -33,8 +47,6 @@
     <string name="no_coordinates">Нет данных о координатах для этого устройства</string>
     <string name="map_hidden_placeholder">Карта появится, когда карточка станет видимой на экране</string>
     <string name="map_load_error">Не удалось загрузить карту</string>
-    <string name="notification_scanning">Сканирование BLE...</string>
-    <string name="notification_node_detected">Обнаружен узел BitChat</string>
 
     <!-- Logs Screen -->
     <string name="detection_log">Журнал обнаружений</string>

@@ -6,57 +6,60 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 
-/**
- */
+/** Runtime permission matrix for BLE scanning and optional coordinate tagging. */
 object PermissionUtils {
-    
-    /**
-     */
+
     fun getRequiredPermissions(): List<String> {
-        val list = mutableListOf<String>()
-        
-
+        val permissions = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            list += Manifest.permission.BLUETOOTH_SCAN
-            list += Manifest.permission.BLUETOOTH_CONNECT
+            permissions += Manifest.permission.BLUETOOTH_SCAN
+            permissions += Manifest.permission.BLUETOOTH_CONNECT
         } else {
-
-            list += Manifest.permission.ACCESS_FINE_LOCATION
+            // Android 11 and lower require location permission for BLE scan
+            // results. Request the coarse/precise pair together.
+            permissions += getLocationPermissions()
         }
-        
-
-        if (!list.contains(Manifest.permission.ACCESS_FINE_LOCATION)) {
-            list += Manifest.permission.ACCESS_FINE_LOCATION
-        }
-        
-        return list
+        return permissions
     }
-    
-    /**
-     */
-    fun getOptionalPermissions(): List<String> {
-        val opt = mutableListOf<String>()
-        
 
+    /** Coarse + precise pair required by Android 12+ for a precise request. */
+    fun getLocationPermissions(): List<String> = listOf(
+        Manifest.permission.ACCESS_COARSE_LOCATION,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+    )
+
+    fun getAllPermissionsToRequest(): Array<String> =
+        getRequiredPermissions().distinct().toTypedArray()
+
+    /** Optional on Android 12+: BLE remains usable without coordinate tagging. */
+    fun getOptionalLocationPermissionsToRequest(): Array<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            getLocationPermissions().toTypedArray()
+        } else {
+            emptyArray()
+        }
+
+    fun hasPreciseLocationPermission(context: Context): Boolean =
+        ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+
+    /** Optional notification permission requested only after the user enables notifications. */
+    fun getNotificationPermission(): String? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            opt += Manifest.permission.POST_NOTIFICATIONS
+            Manifest.permission.POST_NOTIFICATIONS
+        } else {
+            null
         }
-        
-        return opt
-    }
-    
-    /**
-     */
-    fun getAllPermissionsToRequest(): Array<String> {
-        return (getRequiredPermissions() + getOptionalPermissions()).distinct().toTypedArray()
-    }
-    
-    /**
-     * 
-     */
-    fun hasAllRequiredPermissions(context: Context): Boolean {
-        return getRequiredPermissions().all {
+
+    fun hasNotificationPermission(context: Context): Boolean =
+        getNotificationPermission()?.let {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        } ?: true
+
+    fun hasAllRequiredPermissions(context: Context): Boolean =
+        getRequiredPermissions().all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
-    }
 }

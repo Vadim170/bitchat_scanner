@@ -59,6 +59,106 @@ jobs:
             exit 1
           fi
 
+      - name: Run unit tests and build debug APK
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --console=plain
+
+      - name: Verify hybrid BLE scanner contract
+        env:
+          DEBUG_APK: app/build/outputs/apk/debug/app-debug.apk
+        run: |
+          set -euo pipefail
+
+          forbidden_source_pattern='BleScannerService|android\.app\.Service|startForeground(Service)?|ServiceCompat|FOREGROUND_SERVICE|foregroundServiceType|getRunningServices|startForegroundService|ACCESS_BACKGROUND_LOCATION|BLUETOOTH_ADVERTISE|neverForLocation'
+          if rg -n -i "${forbidden_source_pattern}" app/src/main; then
+            echo "Foreground-service, background-service, advertise, or neverForLocation reference found in production sources." >&2
+            exit 1
+          fi
+
+          if ! rg -n 'android:name="android.hardware.bluetooth_le"' app/src/main/AndroidManifest.xml; then
+            echo "The manifest must declare BLE hardware support." >&2
+            exit 1
+          fi
+          if ! rg -n 'android:required="true"' app/src/main/AndroidManifest.xml; then
+            echo "BLE hardware support must be required by the manifest." >&2
+            exit 1
+          fi
+          if ! rg -n 'android:name="\.BleScanReceiver"' app/src/main/AndroidManifest.xml; then
+            echo "The manifest must register the background scan receiver." >&2
+            exit 1
+          fi
+          if ! rg -n 'android:exported="false"' app/src/main/AndroidManifest.xml; then
+            echo "The background scan receiver must be explicitly non-exported." >&2
+            exit 1
+          fi
+          if ! rg -n 'android:allowBackup="false"' app/src/main/AndroidManifest.xml; then
+            echo "Detection history backup must be disabled in the manifest." >&2
+            exit 1
+          fi
+
+          aapt2_path="$(find "${ANDROID_HOME}/build-tools" -type f -name aapt2 | sort | tail -n 1)"
+          if [[ -z "${aapt2_path}" ]]; then
+            echo "Unable to locate aapt2 in ${ANDROID_HOME}/build-tools" >&2
+            exit 1
+          fi
+
+          permissions="$(${aapt2_path} dump permissions "${DEBUG_APK}")"
+          for forbidden_permission in \
+            android.permission.FOREGROUND_SERVICE \
+            android.permission.FOREGROUND_SERVICE_LOCATION \
+            android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE \
+            android.permission.ACCESS_BACKGROUND_LOCATION \
+            android.permission.BLUETOOTH_ADVERTISE; do
+            if grep -Fq "uses-permission: name='${forbidden_permission}'" <<<"${permissions}"; then
+              echo "Forbidden permission remains in the debug APK: ${forbidden_permission}" >&2
+              exit 1
+            fi
+          done
+
+          for required_permission in \
+            android.permission.BLUETOOTH_SCAN \
+            android.permission.BLUETOOTH_CONNECT \
+            android.permission.ACCESS_COARSE_LOCATION \
+            android.permission.ACCESS_FINE_LOCATION \
+            android.permission.POST_NOTIFICATIONS; do
+            if ! grep -Fq "uses-permission: name='${required_permission}'" <<<"${permissions}"; then
+              echo "Required permission is missing from the debug APK: ${required_permission}" >&2
+              exit 1
+            fi
+          done
+
+          manifest_dump="$(${aapt2_path} dump xmltree --file AndroidManifest.xml "${DEBUG_APK}")"
+          if ! grep -Fq 'com.vadim170.bitchatscanner.BleScanReceiver' <<<"${manifest_dump}"; then
+            echo "BleScanReceiver is missing from the debug APK manifest." >&2
+            exit 1
+          fi
+          if ! awk '
+            /com\.vadim170\.bitchatscanner\.BleScanReceiver/ { in_receiver = 1 }
+            in_receiver && /android:exported/ && /false/ { found = 1; exit }
+            in_receiver && /^E: / && !/receiver/ { in_receiver = 0 }
+            END { exit(found ? 0 : 1) }
+          ' <<<"${manifest_dump}"; then
+            echo "BleScanReceiver must be exported=false in the debug APK manifest." >&2
+            exit 1
+          fi
+          if grep -Fq 'com.vadim170.bitchatscanner.BleScannerService' <<<"${manifest_dump}"; then
+            echo "BleScannerService remains registered in the debug APK manifest." >&2
+            exit 1
+          fi
+          if grep -Fq 'neverForLocation' <<<"${manifest_dump}"; then
+            echo "neverForLocation remains in the debug APK manifest." >&2
+            exit 1
+          fi
+          if ! grep -Eq 'android:allowBackup.*=false' <<<"${manifest_dump}"; then
+            echo "Detection history backup must be disabled in the debug APK manifest." >&2
+            exit 1
+          fi
+
+          min_sdk="$(${aapt2_path} dump badging "${DEBUG_APK}" | sed -n "s/^minSdkVersion:'\\([0-9][0-9]*\\)'.*/\\1/p" | head -n 1)"
+          if [[ -z "${min_sdk}" || "${min_sdk}" -lt 26 ]]; then
+            echo "The debug APK must declare minSdkVersion 26 or newer (found: ${min_sdk:-unknown})." >&2
+            exit 1
+          fi
+
       - name: Build release APK
         run: ./gradlew :app:assembleRelease --console=plain
 

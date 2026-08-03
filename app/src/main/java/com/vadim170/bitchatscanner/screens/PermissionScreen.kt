@@ -1,6 +1,5 @@
 package com.vadim170.bitchatscanner.screens
 
-import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
@@ -65,16 +64,6 @@ fun PermissionScreen(onGrantAll: () -> Unit) {
                 )
             }
             
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                item {
-                    PermissionCard(
-                        title = stringResource(R.string.permission_notifications_title),
-                        subtitle = stringResource(R.string.permission_notifications_subtitle)
-                    )
-                }
-            }
-
             item {
                 Spacer(Modifier.height(8.dp))
             }

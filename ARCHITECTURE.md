@@ -59,8 +59,14 @@ com.vadim170.bitchatscanner/
 - Detections without a coordinate remain in history but are omitted from coordinate-based map rendering.
 - Map tile requests go to the configured osmdroid/OpenStreetMap tile provider; detection records stay in the app-local database, are not sent to an app backend, and are excluded from app backup.
 
-## Release Notes
+## CI/CD and Release Artifacts
 
 - Public repository builds do not depend on a checked-in Firebase config.
-- Release signing is driven by environment variables in CI.
-- GitHub Actions can publish signed APK builds from `main`.
+- `ci.yml` runs on pull requests, pushes to `main`, and manual CI dispatches. It uploads a debug-key-signed development APK named `bitchat-scanner-debug-pr<PR_NUMBER>-<SHORT_SHA>` for pull requests or `bitchat-scanner-debug-main-<SHORT_SHA>` for `main` (7-day PR retention, 30-day `main` retention), plus run-scoped JUnit and lint artifacts.
+- Debug artifacts are installable for development/QA but are not release-signed and must not be used for production distribution or update testing. A local release build without signing variables produces an unsigned APK.
+- `release.yml` is tag-only (`vX.Y.Z`) or a manual dispatch with the required existing `tag` input. The read-only `validate` job verifies the tag format, exact `versionName`, and ancestry from `main` before the protected `release` environment is used.
+- The read-only `build` job checks out with `persist-credentials: false`, uses the protected `release` environment, builds and verifies both a signed APK and a signed AAB, and uploads the Actions artifact `bitchat-scanner-vX.Y.Z-release-signed` for 90 days. The APK is for installation/sideloading; the AAB is for Google Play upload. Release files use owned names: `bitchat-scanner-vX.Y.Z-release-signed.sha256`, `.build-info.json`, `.manifest-audit.txt`, and `.signer-metadata.txt` alongside the unchanged APK/AAB names. The manifest audit is generated from the release APK and therefore audits the same release variant built alongside the AAB. GitHub Release assets include the APK/AAB, checksum, build info, and signer metadata; the manifest audit remains in the Actions artifact.
+- The separate `publish` job has `contents: write` but no signing secrets. It downloads the exact build artifact and publishes only the allowlisted APK/AAB and prefixed metadata files to the GitHub Release.
+- R8 mapping is kept separately as the Actions-only artifact `bitchat-scanner-vX.Y.Z-r8-mapping` for 90 days. Its visibility follows repository GitHub Actions artifact permissions; it is not a GitHub Release asset.
+- Release signing uses the protected `release` environment secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`; missing secrets fail closed. Do not place signing material in artifacts.
+- Artifact paths are explicitly allowlisted. Build archives must not include the workspace, `RUNNER_TEMP`, keystores, generated local databases, map caches, or broad `app/build/**` output. APK/AAB packages contain no app-local detection history or location records.

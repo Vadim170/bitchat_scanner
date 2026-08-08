@@ -53,37 +53,68 @@ BitChat Scanner is an Android 8.0+ app for detecting nearby BitChat devices over
 ./gradlew assembleDebug
 ```
 
+`assembleDebug` produces an installable APK signed with the Android debug key. It is for development and QA only; it is not the release signing identity and cannot be used for production updates. A local `./gradlew assembleRelease` without the CI signing environment produces `app-release-unsigned.apk`; do not distribute or present that file as a release build.
+
 Notes:
 
 - The public repo intentionally excludes local/private files such as `.idea/`, `local.properties`, `app/google-services.json`, and release signing keystores.
 - If you want to experiment with your own private services locally, keep those files only on your machine and do not commit them.
 - Release signing is configured through environment variables in CI, not through committed files.
 
-## GitHub releases
+## CI artifacts and GitHub releases
 
-The GitHub Actions workflow publishes a signed APK when you push a version tag.
+Android CI runs on pull requests, pushes to `main`, and manual CI dispatches. The run summary's **Artifacts** section contains only the explicitly packaged files below; artifact retention is separate from GitHub Release retention.
 
-Example:
+| Audience / trigger | Artifact name | Retention | What to use it for |
+| --- | --- | --- | --- |
+| Developer / pull request | `bitchat-scanner-debug-pr<PR_NUMBER>-<SHORT_SHA>` | 7 days | Install the debug-signed APK for a smoke test; development only. |
+| QA / push to `main` | `bitchat-scanner-debug-main-<SHORT_SHA>` | 30 days | Test the latest green `main` build; development only. |
+| Test reports / any CI run | `bitchat-scanner-junit-<RUN_ID>` and `bitchat-scanner-lint-<RUN_ID>` | PR: 7 days; otherwise: 30 days | Inspect JUnit XML and lint output. |
+| Release manager / version tag | `bitchat-scanner-vX.Y.Z-release-signed` | 90 days as an Actions artifact | Signed APK for device installation, signed AAB for Google Play, and owned-name checksum/build-info/manifest-audit/signer-metadata files. |
+| Crash analysis / repository Actions users | `bitchat-scanner-vX.Y.Z-r8-mapping` | 90 days | Actions-only R8 obfuscation mapping; repository visibility follows GitHub Actions artifact permissions, and it is not a GitHub Release asset. |
+
+Manual **Android CI** dispatches use the selected ref (sanitized for the artifact name) instead of the `pr<PR_NUMBER>` or `main` channel, and retain the debug artifact and reports for 30 days.
+
+For a PR or `main` build, open **Actions**, select **Android CI**, open the green run, choose **Artifacts**, and download the matching ZIP. Extract it and install the APK, for example:
+
+```bash
+adb install -r bitchat-scanner-debug-pr42-a1b2c3d.apk
+```
+
+The debug APK is debug-key signed and must not be used for production distribution or update testing. Its `build-info.json` records `signed: false` to distinguish it from a release-signed artifact. The packaged `checksums.txt` can be checked with `sha256sum -c checksums.txt` from the extracted directory.
+
+### Publishing a signed release
+
+Release publishing is tag-only. Update `versionName` and `versionCode` in `app/build.gradle`, merge the commit into `main`, then push an exact `vX.Y.Z` tag:
+
 
 ```bash
 git tag v1.0.3
 git push origin v1.0.3
 ```
 
-The workflow validates that the pushed tag matches `versionName` from the Android build. For example, tag `v1.0.3` must match:
+The **Android Release** workflow validates the `vX.Y.Z` format, requires the tagged commit to be an ancestor of `origin/main`, and requires the tag to match `versionName` exactly. To rerun an existing tag manually, choose **Actions → Android Release → Run workflow** and enter that existing tag in the required `tag` input (for example, `v1.0.3`); the workflow still validates the tag before accessing signing secrets.
+
+The canonical release page contains `bitchat-scanner-vX.Y.Z-release-signed.apk`, `bitchat-scanner-vX.Y.Z-release-signed.aab`, `bitchat-scanner-vX.Y.Z-release-signed.sha256`, `bitchat-scanner-vX.Y.Z-release-signed.build-info.json`, and `bitchat-scanner-vX.Y.Z-release-signed.signer-metadata.txt`. The APK is the installable/sideloadable artifact. The AAB is for Google Play upload and cannot be installed directly with `adb`. The same package is retained as an Actions artifact for 90 days; that artifact additionally contains `bitchat-scanner-vX.Y.Z-release-signed.manifest-audit.txt`.
+
+To download the release package from Actions, open **Actions → Android Release**, select the completed tag run, choose **Artifacts**, and download `bitchat-scanner-v1.0.3-release-signed` (substitute the actual tag). From the extracted directory, verify `sha256sum -c bitchat-scanner-v1.0.3-release-signed.sha256`. For long-lived distribution, use the matching GitHub Release assets instead; use the R8 mapping artifact for crash analysis only.
+
+For example, tag `v1.0.3` must match:
 
 ```groovy
 versionName "1.0.3"
 ```
 
-If the tag and app version do not match, the release job fails instead of publishing a mismatched APK.
+If the tag and app version do not match, or the commit is not on `main`, the `validate` job fails instead of allowing a mismatched build to reach `publish`. Release assets remain on the GitHub Release until that release is removed; this is independent of the 90-day Actions artifact retention.
 
-Required GitHub Actions secrets:
+The `build` job uses the protected GitHub Actions `release` environment. Configure required reviewers/protection rules there and store these as environment secrets, never in PR or `main` jobs:
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
+
+The `validate` job and the signing `build` job use read-only repository permissions and `persist-credentials: false`; the signing `build` job is the only job that receives the `release` environment secrets. It verifies APK and AAB signatures and uploads the exact signed artifact. A separate `publish` job has `contents: write`, receives no signing secrets, downloads that exact artifact, and uploads only the allowlisted APK/AAB and prefixed metadata files to the GitHub Release. Missing signing secrets fail the build; no unsigned tag artifact is published. Do not upload `app/build/**` wholesale: it can contain large R8 outputs, reports, generated metadata, or runner paths. CI artifacts contain build products only; the app's local SQLite detection history, map cache, and location records are not part of an APK/AAB build.
 
 ## Project notes
 

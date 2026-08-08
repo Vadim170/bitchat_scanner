@@ -1,0 +1,367 @@
+name: Android Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to validate and publish
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      tag_name: ${{ steps.tag.outputs.tag_name }}
+      tag_sha: ${{ steps.tag.outputs.tag_sha }}
+      version_name: ${{ steps.tag.outputs.version_name }}
+      version_code: ${{ steps.tag.outputs.version_code }}
+
+    steps:
+      - name: Checkout requested tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Validate tag, version, and main ancestry
+        id: tag
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag_name="${REQUESTED_TAG}"
+          else
+            tag_name="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "${tag_name}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vX.Y.Z (received: ${tag_name:-<empty>})." >&2
+            exit 1
+          fi
+
+          git fetch --no-tags origin "+refs/tags/${tag_name}:refs/tags/${tag_name}"
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          tag_sha="$(git rev-parse "refs/tags/${tag_name}^{commit}")"
+          if ! git merge-base --is-ancestor "${tag_sha}" refs/remotes/origin/main; then
+            echo "Tag ${tag_name} (${tag_sha}) is not an ancestor of origin/main." >&2
+            exit 1
+          fi
+
+          version_name="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]+"([^"]+)".*/\1/p' app/build.gradle | head -n 1)"
+          version_code="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' app/build.gradle | head -n 1)"
+          expected_tag="v${version_name}"
+          if [[ -z "${version_name}" || "${tag_name}" != "${expected_tag}" ]]; then
+            echo "Tag ${tag_name} does not match app versionName ${version_name:-<unknown>}; expected ${expected_tag:-<unknown>}." >&2
+            exit 1
+          fi
+          [[ -n "${version_code}" ]] || { echo "Unable to read versionCode from app/build.gradle." >&2; exit 1; }
+
+          {
+            echo "tag_name=${tag_name}"
+            echo "tag_sha=${tag_sha}"
+            echo "version_name=${version_name}"
+            echo "version_code=${version_code}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Run release validation tests, lint, and debug build
+        run: >-
+          ./gradlew
+          :app:testDebugUnitTest
+          :app:compileDebugAndroidTestKotlin
+          :app:lintDebug
+          :app:assembleDebug
+          --no-daemon
+          --console=plain
+
+      - name: Verify hybrid BLE scanner contract
+        env:
+          DEBUG_APK: app/build/outputs/apk/debug/app-debug.apk
+          MANIFEST_AUDIT: ${{ runner.temp }}/bitchat-scanner-release-debug-manifest.txt
+        run: |
+          set -euo pipefail
+          bash scripts/ci/verify-android-manifest.sh \
+            --apk "${DEBUG_APK}" \
+            --output "${MANIFEST_AUDIT}"
+
+  build:
+    name: Build signed release
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: release
+    permissions:
+      contents: read
+    outputs:
+      artifact_name: ${{ steps.package.outputs.base_name }}
+      apk_name: ${{ steps.package.outputs.apk_name }}
+      aab_name: ${{ steps.package.outputs.aab_name }}
+      checksums_name: ${{ steps.package.outputs.checksums_name }}
+      build_info_name: ${{ steps.package.outputs.build_info_name }}
+      signer_metadata_name: ${{ steps.package.outputs.signer_metadata_name }}
+
+    steps:
+      - name: Checkout validated tag commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.tag_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build signed APK and AAB
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          for secret_name in \
+            ANDROID_KEYSTORE_BASE64 \
+            ANDROID_KEYSTORE_PASSWORD \
+            ANDROID_KEY_ALIAS \
+            ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!secret_name}" ]]; then
+              echo "Missing required Android signing secret: ${secret_name}" >&2
+              exit 1
+            fi
+          done
+
+          umask 077
+          keystore_path="${RUNNER_TEMP}/bitchat-scanner-release.keystore"
+          trap 'rm -f "${keystore_path}"' EXIT
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${keystore_path}"
+
+          ANDROID_KEYSTORE_PATH="${keystore_path}" \
+          ANDROID_KEYSTORE_PASSWORD="${ANDROID_KEYSTORE_PASSWORD}" \
+          ANDROID_KEY_ALIAS="${ANDROID_KEY_ALIAS}" \
+          ANDROID_KEY_PASSWORD="${ANDROID_KEY_PASSWORD}" \
+            ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon --console=plain
+
+      - name: Verify signed APK and AAB
+        env:
+          RELEASE_APK_METADATA: app/build/outputs/apk/release/output-metadata.json
+          RELEASE_AAB: app/build/outputs/bundle/release/app-release.aab
+        run: |
+          set -euo pipefail
+
+          output_file="$(jq -r '.elements[0].outputFile // empty' "${RELEASE_APK_METADATA}")"
+          release_apk="app/build/outputs/apk/release/${output_file}"
+          [[ -f "${release_apk}" ]] || { echo "Release APK not found: ${release_apk}" >&2; exit 1; }
+          [[ -f "${RELEASE_AAB}" ]] || { echo "Release AAB not found: ${RELEASE_AAB}" >&2; exit 1; }
+
+          apksigner_path="$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          [[ -x "${apksigner_path}" ]] || { echo "Unable to locate apksigner." >&2; exit 1; }
+          "${apksigner_path}" verify --verbose "${release_apk}"
+          jarsigner_output="$("${JAVA_HOME}/bin/jarsigner" -verify -verbose -certs "${RELEASE_AAB}" 2>&1)" || {
+            printf '%s\n' "${jarsigner_output}" >&2
+            exit 1
+          }
+          if ! grep -Fq 'jar verified.' <<<"${jarsigner_output}"; then
+            printf '%s\n' "${jarsigner_output}" >&2
+            echo "jarsigner did not confirm a verified AAB signature." >&2
+            exit 1
+          fi
+
+      - name: Audit and package release artifacts
+        id: package
+        env:
+          RELEASE_APK_METADATA: app/build/outputs/apk/release/output-metadata.json
+          RELEASE_AAB: app/build/outputs/bundle/release/app-release.aab
+          TAG_NAME: ${{ needs.validate.outputs.tag_name }}
+          EXPECTED_VERSION_NAME: ${{ needs.validate.outputs.version_name }}
+          EXPECTED_VERSION_CODE: ${{ needs.validate.outputs.version_code }}
+        run: |
+          set -euo pipefail
+
+          output_file="$(jq -r '.elements[0].outputFile // empty' "${RELEASE_APK_METADATA}")"
+          version_name="$(jq -r '.elements[0].versionName // empty' "${RELEASE_APK_METADATA}")"
+          version_code="$(jq -r '.elements[0].versionCode // empty' "${RELEASE_APK_METADATA}")"
+          release_apk="app/build/outputs/apk/release/${output_file}"
+          [[ -f "${release_apk}" ]] || { echo "Release APK not found: ${release_apk}" >&2; exit 1; }
+          [[ -f "${RELEASE_AAB}" ]] || { echo "Release AAB not found: ${RELEASE_AAB}" >&2; exit 1; }
+          [[ "${version_name}" == "${EXPECTED_VERSION_NAME}" ]] || { echo "APK versionName differs from validated version." >&2; exit 1; }
+          [[ "${version_code}" == "${EXPECTED_VERSION_CODE}" ]] || { echo "APK versionCode differs from validated version." >&2; exit 1; }
+
+          base_name="bitchat-scanner-${TAG_NAME}-release-signed"
+          apk_name="${base_name}.apk"
+          aab_name="${base_name}.aab"
+          checksums_name="${base_name}.sha256"
+          build_info_name="${base_name}.build-info.json"
+          signer_metadata_name="${base_name}.signer-metadata.txt"
+          manifest_audit_name="${base_name}.manifest-audit.txt"
+          staging_dir="${RUNNER_TEMP}/${base_name}"
+          mkdir -p "${staging_dir}"
+
+          cp "${release_apk}" "${staging_dir}/${apk_name}"
+          cp "${RELEASE_AAB}" "${staging_dir}/${aab_name}"
+
+          # The release APK and AAB use the same release variant; audit the APK
+          # manifest as the variant contract without inventing a separate AAB audit.
+          bash scripts/ci/verify-android-manifest.sh \
+            --apk "${staging_dir}/${apk_name}" \
+            --output "${staging_dir}/${manifest_audit_name}"
+
+          apksigner_path="$(find "${ANDROID_HOME}/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          [[ -x "${apksigner_path}" ]] || { echo "Unable to locate apksigner." >&2; exit 1; }
+          {
+            echo "APK signer metadata"
+            "${apksigner_path}" verify --print-certs "${staging_dir}/${apk_name}"
+            echo
+            echo "AAB signer metadata"
+            "${JAVA_HOME}/bin/jarsigner" -verify -verbose -certs "${staging_dir}/${aab_name}"
+          } > "${staging_dir}/${signer_metadata_name}"
+
+          (cd "${staging_dir}" && sha256sum "${apk_name}" "${aab_name}" > "${checksums_name}")
+          commit_sha="$(git rev-parse HEAD)"
+          jq -n \
+            --arg commit_sha "${commit_sha}" \
+            --arg tag_name "${TAG_NAME}" \
+            --arg version_name "${version_name}" \
+            --arg version_code "${version_code}" \
+            --arg apk "${apk_name}" \
+            --arg aab "${aab_name}" \
+            --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{commit_sha: $commit_sha, tag_name: $tag_name, version_name: $version_name,
+              version_code: ($version_code | tonumber), variant: "release", signed: true,
+              apk: $apk, aab: $aab,
+              manifest_audit: "APK release variant (same variant used for AAB)",
+              generated_at: $generated_at}' \
+            > "${staging_dir}/${build_info_name}"
+
+          {
+            echo "staging_dir=${staging_dir}"
+            echo "base_name=${base_name}"
+            echo "apk_name=${apk_name}"
+            echo "aab_name=${aab_name}"
+            echo "checksums_name=${checksums_name}"
+            echo "build_info_name=${build_info_name}"
+            echo "signer_metadata_name=${signer_metadata_name}"
+            echo "manifest_audit_name=${manifest_audit_name}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload signed release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.base_name }}
+          if-no-files-found: error
+          retention-days: 90
+          path: |
+            ${{ steps.package.outputs.staging_dir }}/${{ steps.package.outputs.apk_name }}
+            ${{ steps.package.outputs.staging_dir }}/${{ steps.package.outputs.aab_name }}
+            ${{ steps.package.outputs.staging_dir }}/${{ steps.package.outputs.checksums_name }}
+            ${{ steps.package.outputs.staging_dir }}/${{ steps.package.outputs.build_info_name }}
+            ${{ steps.package.outputs.staging_dir }}/${{ steps.package.outputs.manifest_audit_name }}
+            ${{ steps.package.outputs.staging_dir }}/${{ steps.package.outputs.signer_metadata_name }}
+
+      - name: Upload R8 mapping as Actions artifact
+        if: ${{ steps.package.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitchat-scanner-${{ needs.validate.outputs.tag_name }}-r8-mapping
+          if-no-files-found: ignore
+          retention-days: 90
+          path: app/build/outputs/mapping/release/mapping.txt
+
+  publish:
+    name: Publish GitHub release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download exact signed distributables
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact_name }}
+          path: ${{ runner.temp }}/bitchat-scanner-release-distributables
+
+      - name: Publish allowlisted GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ needs.validate.outputs.tag_name }}
+          VERSION_NAME: ${{ needs.validate.outputs.version_name }}
+          VERSION_CODE: ${{ needs.validate.outputs.version_code }}
+          COMMIT_SHA: ${{ needs.validate.outputs.tag_sha }}
+          RELEASE_DIR: ${{ runner.temp }}/bitchat-scanner-release-distributables
+          RELEASE_APK: ${{ needs.build.outputs.apk_name }}
+          RELEASE_AAB: ${{ needs.build.outputs.aab_name }}
+          RELEASE_CHECKSUMS: ${{ needs.build.outputs.checksums_name }}
+          RELEASE_BUILD_INFO: ${{ needs.build.outputs.build_info_name }}
+          RELEASE_SIGNER_METADATA: ${{ needs.build.outputs.signer_metadata_name }}
+        run: |
+          set -euo pipefail
+
+          assets=(
+            "${RELEASE_DIR}/${RELEASE_APK}"
+            "${RELEASE_DIR}/${RELEASE_AAB}"
+            "${RELEASE_DIR}/${RELEASE_CHECKSUMS}"
+            "${RELEASE_DIR}/${RELEASE_BUILD_INFO}"
+            "${RELEASE_DIR}/${RELEASE_SIGNER_METADATA}"
+          )
+          for asset in "${assets[@]}"; do
+            [[ -f "${asset}" ]] || { echo "Expected release asset missing: ${asset}" >&2; exit 1; }
+          done
+
+          notes_file="${RUNNER_TEMP}/bitchat-scanner-release-notes.txt"
+          printf 'Release %s\n\nversionName: %s\nversionCode: %s\ncommit: %s\n' \
+            "${TAG_NAME}" "${VERSION_NAME}" "${VERSION_CODE}" "${COMMIT_SHA}" > "${notes_file}"
+
+          if gh release view "${TAG_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${TAG_NAME}" "${assets[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+            gh release edit "${TAG_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "BitChat Scanner ${VERSION_NAME}" \
+              --notes-file "${notes_file}"
+          else
+            gh release create "${TAG_NAME}" "${assets[@]}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "BitChat Scanner ${VERSION_NAME}" \
+              --notes-file "${notes_file}" \
+              --target "${COMMIT_SHA}"
+          fi

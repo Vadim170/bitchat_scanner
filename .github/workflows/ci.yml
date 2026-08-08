@@ -1,0 +1,153 @@
+name: Android CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify Android build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Run tests, lint, and build debug APK
+        id: build
+        run: >-
+          ./gradlew
+          :app:testDebugUnitTest
+          :app:compileDebugAndroidTestKotlin
+          :app:lintDebug
+          :app:assembleDebug
+          --no-daemon
+          --console=plain
+
+      - name: Verify hybrid BLE scanner contract
+        id: manifest
+        env:
+          DEBUG_APK: app/build/outputs/apk/debug/app-debug.apk
+          MANIFEST_AUDIT: ${{ runner.temp }}/bitchat-scanner-debug-manifest.txt
+        run: |
+          set -euo pipefail
+          bash scripts/ci/verify-android-manifest.sh \
+            --apk "${DEBUG_APK}" \
+            --output "${MANIFEST_AUDIT}"
+
+      - name: Upload JUnit XML reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitchat-scanner-junit-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+          path: app/build/test-results/testDebugUnitTest/**/*.xml
+
+      - name: Upload lint reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitchat-scanner-lint-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+          path: |
+            app/build/reports/lint-results-debug.xml
+            app/build/reports/lint-results-debug.html
+
+      - name: Package debug APK artifact
+        id: package
+        if: ${{ steps.build.outcome == 'success' && steps.manifest.outcome == 'success' }}
+        env:
+          DEBUG_APK: app/build/outputs/apk/debug/app-debug.apk
+          DEBUG_METADATA: app/build/outputs/apk/debug/output-metadata.json
+          MANIFEST_AUDIT: ${{ runner.temp }}/bitchat-scanner-debug-manifest.txt
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          [[ -f "${DEBUG_APK}" ]] || { echo "Debug APK not found: ${DEBUG_APK}" >&2; exit 1; }
+          [[ -f "${DEBUG_METADATA}" ]] || { echo "Debug output metadata not found: ${DEBUG_METADATA}" >&2; exit 1; }
+          [[ -f "${MANIFEST_AUDIT}" ]] || { echo "Manifest audit not found: ${MANIFEST_AUDIT}" >&2; exit 1; }
+
+          version_name="$(jq -r '.elements[0].versionName // empty' "${DEBUG_METADATA}")"
+          version_code="$(jq -r '.elements[0].versionCode // empty' "${DEBUG_METADATA}")"
+          [[ -n "${version_name}" && -n "${version_code}" ]] || {
+            echo "Unable to read version metadata from ${DEBUG_METADATA}" >&2
+            exit 1
+          }
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" && -n "${PR_NUMBER}" ]]; then
+            channel="pr${PR_NUMBER}"
+          else
+            ref_label="$(printf '%s' "${GITHUB_REF_NAME:-ref}" | tr '/_' '--' | tr -cd '[:alnum:].-')"
+            channel="${ref_label:-ref}"
+          fi
+          short_sha="${GITHUB_SHA:0:7}"
+          artifact_name="bitchat-scanner-debug-${channel}-${short_sha}"
+          apk_name="${artifact_name}.apk"
+          staging_dir="${RUNNER_TEMP}/${artifact_name}"
+          mkdir -p "${staging_dir}"
+
+          cp "${DEBUG_APK}" "${staging_dir}/${apk_name}"
+          cp "${DEBUG_METADATA}" "${staging_dir}/output-metadata.json"
+          cp "${MANIFEST_AUDIT}" "${staging_dir}/manifest-audit.txt"
+          (cd "${staging_dir}" && sha256sum "${apk_name}" > checksums.txt)
+
+          jq -n \
+            --arg commit_sha "${GITHUB_SHA}" \
+            --arg ref "${GITHUB_REF}" \
+            --arg version_name "${version_name}" \
+            --arg version_code "${version_code}" \
+            --arg variant "debug" \
+            --arg signed "false" \
+            --arg apk "${apk_name}" \
+            --arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{commit_sha: $commit_sha, ref: $ref, version_name: $version_name,
+              version_code: ($version_code | tonumber), variant: $variant,
+              signed: ($signed == "true"), apk: $apk, generated_at: $generated_at}' \
+            > "${staging_dir}/build-info.json"
+
+          {
+            echo "staging_dir=${staging_dir}"
+            echo "artifact_name=${artifact_name}"
+            echo "apk_name=${apk_name}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload debug APK artifact
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 30 }}
+          path: |
+            ${{ steps.package.outputs.staging_dir }}/${{ steps.package.outputs.apk_name }}
+            ${{ steps.package.outputs.staging_dir }}/output-metadata.json
+            ${{ steps.package.outputs.staging_dir }}/checksums.txt
+            ${{ steps.package.outputs.staging_dir }}/build-info.json
+            ${{ steps.package.outputs.staging_dir }}/manifest-audit.txt

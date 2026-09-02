@@ -16,6 +16,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.os.ParcelUuid
+import android.provider.Settings
 import android.util.Log
 import androidx.annotation.RequiresPermission
 import androidx.core.app.ActivityCompat
@@ -66,6 +67,7 @@ class BleScanCoordinator private constructor(context: Context) {
         PASSIVE_BACKGROUND,
         PERMISSION_REQUIRED,
         BLUETOOTH_DISABLED,
+        LOCATION_DISABLED,
         UNAVAILABLE,
         ERROR,
 
@@ -262,12 +264,13 @@ class BleScanCoordinator private constructor(context: Context) {
                 .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
                 .build()
 
-            // Foreground callback intentionally stays broad.  Some BitChat
-            // advertisements carry only service data, and the strict matcher
-            // below covers all protocol layouts without relying on OEM filter
-            // support.  Only PendingIntent mode is hardware-filtered.
-            val foregroundFilters: List<ScanFilter>? = null
-            leScanner.startScan(foregroundFilters, settings, callback)
+            // The visible callback is filtered like the PendingIntent path.
+            // The platform suspends unfiltered scans when the screen turns off
+            // and demotes them to opportunistic after its scan timeout (30
+            // minutes by default), which would silently end a long visible
+            // session.  The strict matcher in acceptsResult() still validates
+            // every delivered result, so the filters only narrow delivery.
+            startVisibleScanLocked(leScanner, settings)
             callbackScanner = leScanner
             callbackRegistered = true
             _state.value = State.ACTIVE_VISIBLE
@@ -306,42 +309,27 @@ class BleScanCoordinator private constructor(context: Context) {
             .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
             .setReportDelay(3000L)
             .build()
-        val filters = buildPendingFilters()
+        val filters = buildScanFilters()
         try {
-            leScanner.startScan(filters.primary, settings, pi)
+            // Never fall back to an unfiltered PendingIntent: the platform
+            // suspends unfiltered scans while the screen is off, and a hidden
+            // app must not receive every advertisement nearby.
+            startWithFilters(
+                filters = filters,
+                start = { leScanner.startScan(it, settings, pi) },
+                cancel = { leScanner.stopScan(pi) },
+                limitedEvent = "background_service_data_filter_limited",
+            )
         } catch (e: SecurityException) {
             setStateLocked(State.PERMISSION_REQUIRED)
             emitLine("${timestamp()},no_scan_permission")
             Log.w(TAG, "BLE PendingIntent permission was revoked", e)
             return false
         } catch (e: IllegalArgumentException) {
-            // A small number of vendor stacks reject a zero-length service-data
-            // pattern even though the AOSP builder accepts it.  Retry only with
-            // the documented service UUID/solicitation filters and log the
-            // limitation; never fall back to an unfiltered PendingIntent.
-            if (filters.fallback == filters.primary) {
-                setStateLocked(State.ERROR)
-                emitLine("${timestamp()},background_filter_rejected")
-                Log.e(TAG, "BLE PendingIntent filters rejected", e)
-                return false
-            }
-            emitLine("${timestamp()},background_service_data_filter_limited")
-            // Defensive cancellation in case a vendor accepted part of the
-            // primary registration before rejecting its filter list.
-            runCatching { leScanner.stopScan(pi) }
-            try {
-                leScanner.startScan(filters.fallback, settings, pi)
-            } catch (retry: SecurityException) {
-                setStateLocked(State.PERMISSION_REQUIRED)
-                emitLine("${timestamp()},no_scan_permission")
-                Log.w(TAG, "BLE PendingIntent permission was revoked", retry)
-                return false
-            } catch (retry: RuntimeException) {
-                setStateLocked(State.ERROR)
-                emitLine("${timestamp()},background_filter_rejected")
-                Log.e(TAG, "BLE fallback PendingIntent filters rejected", retry)
-                return false
-            }
+            setStateLocked(State.ERROR)
+            emitLine("${timestamp()},background_filter_rejected")
+            Log.e(TAG, "BLE PendingIntent filters rejected", e)
+            return false
         } catch (e: RuntimeException) {
             setStateLocked(State.ERROR)
             emitLine("${timestamp()},background_scan_start_failed")
@@ -356,12 +344,13 @@ class BleScanCoordinator private constructor(context: Context) {
         return true
     }
 
-    private data class PendingFilters(
+    private data class ScanFilters(
         val primary: List<ScanFilter>,
         val fallback: List<ScanFilter>,
     )
 
-    private fun buildPendingFilters(): PendingFilters {
+    /** Shared by the visible callback and the hidden PendingIntent registration. */
+    private fun buildScanFilters(): ScanFilters {
         val serviceFilter = ScanFilter.Builder()
             .setServiceUuid(serviceUuid)
             .build()
@@ -377,7 +366,7 @@ class BleScanCoordinator private constructor(context: Context) {
                 .setServiceData(serviceUuid, byteArrayOf(), byteArrayOf())
                 .build()
         } catch (e: IllegalArgumentException) {
-            emitLine("${timestamp()},background_service_data_filter_limited")
+            emitLine("${timestamp()},service_data_filter_limited")
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -388,12 +377,65 @@ class BleScanCoordinator private constructor(context: Context) {
                 primary += solicitation
                 fallback += solicitation
             } catch (e: IllegalArgumentException) {
-                emitLine("${timestamp()},background_solicitation_filter_limited")
+                emitLine("${timestamp()},solicitation_filter_limited")
             }
         } else {
-            emitLine("${timestamp()},background_solicitation_filter_unavailable_api")
+            emitLine("${timestamp()},solicitation_filter_unavailable_api")
         }
-        return PendingFilters(primary = primary, fallback = fallback)
+        return ScanFilters(primary = primary, fallback = fallback)
+    }
+
+    /**
+     * Start a registration with the primary filter list, retrying with the
+     * documented service-UUID/solicitation fallback when a vendor stack rejects
+     * the zero-length service-data presence filter.  An IllegalArgumentException
+     * from the fallback propagates so each caller decides whether continuing
+     * unfiltered is acceptable.
+     */
+    private fun startWithFilters(
+        filters: ScanFilters,
+        start: (List<ScanFilter>) -> Unit,
+        cancel: () -> Unit,
+        limitedEvent: String,
+    ) {
+        try {
+            start(filters.primary)
+            return
+        } catch (e: IllegalArgumentException) {
+            if (filters.fallback == filters.primary) throw e
+            emitLine("${timestamp()},$limitedEvent")
+            // Defensive cancellation in case a vendor accepted part of the
+            // primary registration before rejecting its filter list.
+            runCatching { cancel() }
+        }
+        start(filters.fallback)
+    }
+
+    /**
+     * Register the visible callback with the shared filter list.  If a vendor
+     * stack rejects even the documented fallback filters, the visible session
+     * may continue unfiltered because the host is on screen; the PendingIntent
+     * path never does that.
+     *
+     * Invoked only after scannerOrUpdateStateLocked() has passed the runtime
+     * permission guard; the caller handles a SecurityException from a
+     * concurrent revoke.
+     */
+    @SuppressLint("MissingPermission")
+    private fun startVisibleScanLocked(leScanner: BluetoothLeScanner, settings: ScanSettings) {
+        try {
+            startWithFilters(
+                filters = buildScanFilters(),
+                start = { leScanner.startScan(it, settings, callback) },
+                cancel = { leScanner.stopScan(callback) },
+                limitedEvent = "visible_service_data_filter_limited",
+            )
+        } catch (e: IllegalArgumentException) {
+            emitLine("${timestamp()},visible_filters_rejected")
+            Log.w(TAG, "Visible BLE filters rejected; continuing unfiltered while on screen", e)
+            runCatching { leScanner.stopScan(callback) }
+            leScanner.startScan(null, settings, callback)
+        }
     }
 
     @Synchronized
@@ -636,11 +678,7 @@ class BleScanCoordinator private constructor(context: Context) {
     }
 
     private fun getBestLastKnownLocation(): Location? {
-        if (ActivityCompat.checkSelfPermission(
-                appContext,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-            ) != PackageManager.PERMISSION_GRANTED
-        ) return null
+        if (!hasPreciseLocationPermission()) return null
 
         return try {
             val locationManager =
@@ -666,6 +704,11 @@ class BleScanCoordinator private constructor(context: Context) {
         if (!hasRequiredPermissions()) {
             setStateLocked(State.PERMISSION_REQUIRED)
             emitLine("${timestamp()},no_scan_permission")
+            return null
+        }
+        if (!isLocationEnabled()) {
+            setStateLocked(State.LOCATION_DISABLED)
+            emitLine("${timestamp()},location_disabled")
             return null
         }
         val manager = bluetoothManager
@@ -711,19 +754,42 @@ class BleScanCoordinator private constructor(context: Context) {
         }
     }
 
+    /**
+     * Precise location is part of the scan contract on every supported API
+     * level.  The manifest declares BLUETOOTH_SCAN without the location
+     * opt-out flag, so on Android 12+ the Bluetooth stack only delivers results while
+     * ACCESS_FINE_LOCATION is granted; on Android 8-11 the location grant is
+     * the classic BLE scan requirement.
+     */
     private fun hasRequiredPermissions(): Boolean =
-        hasScanPermission() && hasConnectPermission() &&
-                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S || hasAnyLocationPermission())
+        hasScanPermission() && hasConnectPermission() && hasPreciseLocationPermission()
 
-    private fun hasAnyLocationPermission(): Boolean =
+    private fun hasPreciseLocationPermission(): Boolean =
         ActivityCompat.checkSelfPermission(
             appContext,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED ||
-                ActivityCompat.checkSelfPermission(
-                    appContext,
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                ) == PackageManager.PERMISSION_GRANTED
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * The Bluetooth stack drops scan results for a location-attributed app
+     * while Location Services are off and reports no error.  Surface that as
+     * a distinct state instead of an empty "active" scan.
+     */
+    private fun isLocationEnabled(): Boolean {
+        val locationManager =
+            appContext.getSystemService(LocationManager::class.java) ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            locationManager.isLocationEnabled
+        } else {
+            @Suppress("DEPRECATION")
+            val enabled = Settings.Secure.getInt(
+                appContext.contentResolver,
+                Settings.Secure.LOCATION_MODE,
+                Settings.Secure.LOCATION_MODE_OFF,
+            ) != Settings.Secure.LOCATION_MODE_OFF
+            enabled
+        }
+    }
 
     private fun hasScanPermission(): Boolean =
         ActivityCompat.checkSelfPermission(
@@ -755,6 +821,7 @@ class BleScanCoordinator private constructor(context: Context) {
     private fun emitLine(line: String) {
         _events.tryEmit(Event(line))
         if (line.contains("scan_failed") || line.contains("bluetooth_disabled") ||
+            line.contains("location_disabled") || line.contains("filters_rejected") ||
             line.contains("no_scan_permission") || line.contains("scan_started") ||
             line.contains("scan_stopped") || line.contains("filter_limited") ||
             line.contains("filter_unavailable")

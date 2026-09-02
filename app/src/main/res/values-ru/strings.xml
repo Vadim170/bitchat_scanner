@@ -3,12 +3,14 @@
 
     <!-- Permission Screen -->
     <string name="permissions_title">BitChat Scanner — разрешения</string>
-    <string name="permissions_description">Чтобы сканировать узлы и строить карту покрытия, нужны следующие разрешения:</string>
+    <string name="permissions_description">Чтобы сканировать узлы BitChat и строить карту покрытия, нужны следующие разрешения:</string>
     <string name="permission_bluetooth_title">Bluetooth (сканирование и подключение)</string>
     <string name="permission_bluetooth_subtitle">Нужно, чтобы искать устройства BitChat по BLE-сервису.</string>
-    <string name="permission_location_title">Геопозиция (примерная + точная)</string>
-    <string name="permission_location_subtitle">Нужна для BLE-сканирования на Android 11 и ниже. На Android 12+ необязательна и только добавляет координаты к обнаружениям на переднем плане.</string>
+    <string name="permission_location_title">Точная геопозиция</string>
+    <string name="permission_location_subtitle">Нужна на всех версиях Android. Система передаёт этому приложению результаты BLE-сканирования только при выданной точной геопозиции и включённой службе геолокации. Координаты добавляются к обнаружениям, сделанным пока приложение видно. В системном диалоге выберите «Точное».</string>
     <string name="grant_permissions">Выдать разрешения</string>
+    <string name="permissions_denied_hint">Если Android больше не показывает диалог разрешений, откройте настройки приложения и разрешите «Устройства рядом» (Bluetooth) и точную геопозицию.</string>
+    <string name="open_app_settings">Открыть настройки приложения</string>
     <string name="privacy_notice">История обнаружений хранится локально в приложении и не загружается на сервер приложения. При открытии карты для видимой области загружаются тайлы OpenStreetMap.</string>
 
     <!-- Main Screen -->
@@ -22,18 +24,17 @@
     <string name="scan_state_stopped">Сканер остановлен</string>
     <string name="scan_state_permission_required">Нет разрешения Bluetooth или точной геопозиции</string>
     <string name="scan_state_bluetooth_disabled">Bluetooth выключен</string>
+    <string name="scan_state_location_disabled">Служба геолокации выключена — Android не передаёт результаты BLE-сканирования</string>
+    <string name="open_location_settings">Открыть настройки геолокации</string>
     <string name="scan_state_unavailable">BLE-сканер недоступен</string>
     <string name="scan_state_error">Ошибка сканера — нажмите «Старт» для повтора</string>
-    <string name="location_optional_title">Добавить точные координаты</string>
-    <string name="location_optional_subtitle">На Android 12+ необязательно: сканирование и фоновые уведомления работают без геопозиции. Выдайте доступ к примерной + точной геопозиции, чтобы добавлять координаты к обнаружениям на переднем плане.</string>
-    <string name="grant_location">Выдать геопозицию</string>
     <string name="notifications_title">Уведомления об обнаружениях</string>
     <string name="notifications_subtitle">Уведомлять о подходящих объявлениях BitChat (с паузой). На Android 13+ появится запрос разрешения; отказ отключит уведомления, но не остановит сканирование.</string>
     <string name="notification_channel_name">Обнаружения BitChat</string>
     <string name="notification_channel_description">Уведомления при обнаружении объявления BitChat.</string>
     <string name="notification_detection_title">Обнаружено устройство BitChat</string>
     <string name="notification_detection_body">%1$s · RSSI %2$d дБм</string>
-    <string name="loading">Загрузка...</string>
+    <string name="loading">Загрузка…</string>
     <string name="no_devices_found">Устройства не найдены</string>
 
     <!-- Device Card -->

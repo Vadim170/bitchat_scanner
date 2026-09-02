@@ -1,6 +1,7 @@
 package com.vadim170.bitchatscanner.screens
 
-import android.os.Build
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -73,12 +74,6 @@ fun MainScreen(
     ) { granted ->
         if (granted) mainViewModel.setNotificationsEnabled(true)
     }
-    val locationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        mainViewModel.reloadFromStorage()
-    }
-    
     var showDropdownMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -177,6 +172,8 @@ fun MainScreen(
                         stringResource(R.string.scan_state_permission_required)
                     BleScanCoordinator.State.BLUETOOTH_DISABLED ->
                         stringResource(R.string.scan_state_bluetooth_disabled)
+                    BleScanCoordinator.State.LOCATION_DISABLED ->
+                        stringResource(R.string.scan_state_location_disabled)
                     BleScanCoordinator.State.UNAVAILABLE ->
                         stringResource(R.string.scan_state_unavailable)
                     BleScanCoordinator.State.ERROR -> stringResource(R.string.scan_state_error)
@@ -186,33 +183,19 @@ fun MainScreen(
                 style = MaterialTheme.typography.bodyMedium
             )
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                !PermissionUtils.hasPreciseLocationPermission(context)
-            ) {
+            if (mainUiState.scannerState == BleScanCoordinator.State.LOCATION_DISABLED) {
+                // Android silently drops BLE results for a location-attributed
+                // app while Location Services are off; send the user straight
+                // to the system toggle. onResume retries the persisted session.
                 Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.location_optional_title),
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                        Text(
-                            text = stringResource(R.string.location_optional_subtitle),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Button(
-                        onClick = {
-                            locationPermissionLauncher.launch(
-                                PermissionUtils.getOptionalLocationPermissionsToRequest()
-                            )
+                Button(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
                         }
-                    ) {
-                        Text(stringResource(R.string.grant_location))
                     }
+                ) {
+                    Text(stringResource(R.string.open_location_settings))
                 }
             }
 

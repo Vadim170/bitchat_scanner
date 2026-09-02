@@ -25,21 +25,19 @@ This is a specialized Android 8.0+ app that scans for BitChat network nodes usin
 ## Development Patterns
 
 ### Permission Handling
-Uses version-aware permission requests:
-- **Android 12+**: `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` are core scanner permissions; location is optional, and `ACCESS_FINE_LOCATION` enables visible-session coordinate tagging (requested together with coarse location for a precise grant)
-- **Android 8.0–11**: `ACCESS_COARSE_LOCATION` and `ACCESS_FINE_LOCATION` are required for BLE scan results
+Uses version-aware permission requests; `PermissionUtils.requiredPermissionsFor(sdkInt)` is the single, unit-tested source of the matrix:
+- **Every version**: `ACCESS_FINE_LOCATION` is required (requested together with `ACCESS_COARSE_LOCATION` so Android 12+ offers the precise option). The manifest declares `BLUETOOTH_SCAN` without `neverForLocation`, so Android 12+ only delivers scan results while precise location is granted and Location Services are on; on Android 8.0–11 the location grant is the classic BLE scan requirement.
+- **Android 12+**: `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` are requested in addition
 - **Android 13+**: `POST_NOTIFICATIONS` is optional and only needed for detection notifications
 
 ```kotlin
-// Check BLE and map permissions based on Android version
-if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-    // Request BLUETOOTH_SCAN and BLUETOOTH_CONNECT
-    // Optionally request ACCESS_COARSE_LOCATION + ACCESS_FINE_LOCATION
-    // so visible callback detections can receive coordinates
-} else {
-    // Request ACCESS_COARSE_LOCATION + ACCESS_FINE_LOCATION for BLE scanning
-}
+// Precise location is never optional; Android 12+ adds the Bluetooth runtime pair.
+val required = PermissionUtils.requiredPermissionsFor(Build.VERSION.SDK_INT)
+// API 26-30: [ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION]
+// API 31+:   [BLUETOOTH_SCAN, BLUETOOTH_CONNECT, ACCESS_COARSE_LOCATION, ACCESS_FINE_LOCATION]
 ```
+
+Do not re-introduce an "optional location" path or `neverForLocation` without changing the CI manifest audit, `ManifestContractTest`, and the docs together.
 
 ### Scanner and Activity Lifecycle
 - Start scanning only from a visible Activity after the required permissions are granted.
@@ -48,7 +46,8 @@ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
 - Make the scan `PendingIntent` mutable with `FLAG_MUTABLE | FLAG_UPDATE_CURRENT` because Bluetooth adds result extras; make it explicit to this package/component and reject deliveries after Stop Scanner.
 - Keep notification content `PendingIntent`s targeting `MainActivity` immutable (`FLAG_IMMUTABLE`).
 - Treat hidden delivery as best-effort/throttled and non-continuous; never promise guaranteed background detection.
-- If a vendor rejects the zero-length service-data presence filter, retain service-UUID/solicitation filters and disclose that service-data-only advertisements may be missed in hidden mode; keep the visible callback matcher broad.
+- Both registrations use the shared filter list from `buildScanFilters()`. If a vendor rejects the zero-length service-data presence filter, retain service-UUID/solicitation filters and disclose that service-data-only advertisements may be missed. Only the visible session may continue unfiltered when even the fallback is rejected; the `PendingIntent` path reports an error instead.
+- Treat Location Services off as the distinct `LOCATION_DISABLED` state; never show an "active" scan that cannot receive results.
 - Do not add a foreground service or `ACCESS_BACKGROUND_LOCATION`; background detections must not request fresh coordinates.
 - Keep persisted detection history separate from the scanner session so stopping a scan never clears prior records.
 
@@ -105,7 +104,7 @@ implementation platform(libs.androidx.compose.bom)
 
 ## Location and Notification Integration
 
-On Android 8.0–11, coarse and fine location are required for BLE scan results. On Android 12+, location is optional for scanning; best-effort tagging uses available providers and a last-known location only from the visible active-callback path when `ACCESS_FINE_LOCATION` is granted. Hidden `PendingIntent` detections never request a fresh coordinate and remain in local history without map coordinates. The app does not request `ACCESS_BACKGROUND_LOCATION`.
+Precise location is required on every supported version: Android 8.0–11 need it for BLE scan results, and Android 12+ only delivers results to an app whose `BLUETOOTH_SCAN` is not marked `neverForLocation` while `ACCESS_FINE_LOCATION` is granted and Location Services are on. Best-effort coordinate tagging uses a last-known location only from the visible active-callback path. Hidden `PendingIntent` detections never request a fresh coordinate and remain in local history without map coordinates. The app does not request `ACCESS_BACKGROUND_LOCATION`.
 
 Detection notifications are optional. On Android 13+, displaying them requires the user to grant `POST_NOTIFICATIONS`; scanning and local history do not depend on that grant.
 

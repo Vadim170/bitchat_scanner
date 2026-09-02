@@ -81,7 +81,7 @@ internal class DetectionNotifier(context: Context) {
         val displayName = name?.takeIf { it.isNotBlank() }
             ?: address.uppercase(Locale.US)
         val notification = NotificationCompat.Builder(appContext, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_detection)
             .setContentTitle(appContext.getString(R.string.notification_detection_title))
             .setContentText(
                 appContext.getString(

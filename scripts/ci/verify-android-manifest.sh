@@ -75,6 +75,10 @@ if ! rg -n 'android:allowBackup="false"' "${manifest_path}"; then
   echo "Detection history backup must be disabled in the manifest." >&2
   exit 1
 fi
+if ! rg -n 'android:dataExtractionRules="@xml/data_extraction_rules"' "${manifest_path}"; then
+  echo "Android 12+ device-to-device transfer rules must exclude the detection database." >&2
+  exit 1
+fi
 
 aapt2_path="${AAPT2_PATH:-}"
 if [[ -z "${aapt2_path}" ]]; then

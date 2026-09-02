@@ -1,7 +1,7 @@
 package com.vadim170.bitchatscanner.screens
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,15 +31,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.runtime.DisposableEffect
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.vadim170.bitchatscanner.R
 import com.vadim170.bitchatscanner.components.DeviceCard
+import com.vadim170.bitchatscanner.BleScanCoordinator
 import com.vadim170.bitchatscanner.utils.PermissionUtils
 import com.vadim170.bitchatscanner.viewmodel.DevicesViewModel
 import com.vadim170.bitchatscanner.viewmodel.MainViewModel
@@ -58,13 +67,30 @@ fun MainScreen(
     
     val mainUiState by mainViewModel.uiState.collectAsState()
     val devicesUiState by devicesViewModel.uiState.collectAsState()
-    
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) mainViewModel.setNotificationsEnabled(true)
+    }
     var showDropdownMenu by remember { mutableStateOf(false) }
 
+    LaunchedEffect(Unit) {
+        mainViewModel.reloadFromStorage()
+        devicesViewModel.refresh()
+    }
 
-    val requestPermsLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* no-op */ }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                mainViewModel.reloadFromStorage()
+                devicesViewModel.refresh()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Scaffold(
         topBar = { 
@@ -115,7 +141,10 @@ fun MainScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (mainUiState.isScannerRunning) {
+                if (mainUiState.scannerState == BleScanCoordinator.State.ACTIVE_VISIBLE ||
+                    mainUiState.scannerState == BleScanCoordinator.State.PASSIVE_BACKGROUND ||
+                    mainUiState.scannerState == BleScanCoordinator.State.SCANNING
+                ) {
                     Button(onClick = { mainViewModel.stopScanner() }) { 
                         Text(stringResource(R.string.stop_scanner)) 
                     }
@@ -127,19 +156,80 @@ fun MainScreen(
             }
 
             Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.scan_visibility_note),
+                style = MaterialTheme.typography.bodySmall
+            )
 
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = when (mainUiState.scannerState) {
+                    BleScanCoordinator.State.ACTIVE_VISIBLE,
+                    BleScanCoordinator.State.SCANNING -> stringResource(R.string.scan_state_visible)
+                    BleScanCoordinator.State.PASSIVE_BACKGROUND ->
+                        stringResource(R.string.scan_state_background)
+                    BleScanCoordinator.State.PERMISSION_REQUIRED ->
+                        stringResource(R.string.scan_state_permission_required)
+                    BleScanCoordinator.State.BLUETOOTH_DISABLED ->
+                        stringResource(R.string.scan_state_bluetooth_disabled)
+                    BleScanCoordinator.State.LOCATION_DISABLED ->
+                        stringResource(R.string.scan_state_location_disabled)
+                    BleScanCoordinator.State.UNAVAILABLE ->
+                        stringResource(R.string.scan_state_unavailable)
+                    BleScanCoordinator.State.ERROR -> stringResource(R.string.scan_state_error)
+                    BleScanCoordinator.State.STOPPED,
+                    BleScanCoordinator.State.IDLE -> stringResource(R.string.scan_state_stopped)
+                },
+                style = MaterialTheme.typography.bodyMedium
+            )
 
+            if (mainUiState.scannerState == BleScanCoordinator.State.LOCATION_DISABLED) {
+                // Android silently drops BLE results for a location-attributed
+                // app while Location Services are off; send the user straight
+                // to the system toggle. onResume retries the persisted session.
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.open_location_settings))
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.notifications_title),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    Text(
+                        text = stringResource(R.string.notifications_subtitle),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
                 Switch(
-                    checked = mainUiState.notifyEnabled,
-                    onCheckedChange = { mainViewModel.setNotifyEnabled(it) }
-                )
-                Text(
-                    text = stringResource(R.string.notify_detections), 
-                    style = MaterialTheme.typography.bodyLarge
+                    checked = mainUiState.notificationsEnabled,
+                    onCheckedChange = { enabled ->
+                        if (!enabled) {
+                            mainViewModel.setNotificationsEnabled(false)
+                        } else {
+                            val permission = PermissionUtils.getNotificationPermission()
+                            if (permission != null &&
+                                !PermissionUtils.hasNotificationPermission(context)
+                            ) {
+                                notificationPermissionLauncher.launch(permission)
+                            } else {
+                                mainViewModel.setNotificationsEnabled(true)
+                            }
+                        }
+                    },
                 )
             }
 

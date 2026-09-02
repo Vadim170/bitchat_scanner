@@ -3,23 +3,38 @@
     
     <!-- Permission Screen -->
     <string name="permissions_title">BitChat Scanner — Permissions</string>
-    <string name="permissions_description">To scan nodes and build coverage map, the following permissions are required:</string>
+    <string name="permissions_description">To scan for BitChat nodes and build the coverage map, the following permissions are required:</string>
     <string name="permission_bluetooth_title">Bluetooth (scanning and connection)</string>
     <string name="permission_bluetooth_subtitle">Required to search for BitChat devices via BLE service.</string>
-    <string name="permission_location_title">Location (precise)</string>
-    <string name="permission_location_subtitle">Required to bind detections to coordinates and build network coverage map.</string>
-    <string name="permission_notifications_title">Notifications</string>
-    <string name="permission_notifications_subtitle">Optional. Only needed if you want to receive notifications about new nodes.</string>
+    <string name="permission_location_title">Precise location</string>
+    <string name="permission_location_subtitle">Required on every Android version. Android only delivers BLE scan results to this app while precise location is granted and Location Services are on. Coordinates are attached to detections made while the app is visible. Choose “Precise” in the system dialog.</string>
     <string name="grant_permissions">Grant Permissions</string>
-    <string name="privacy_notice">We don\'t send coordinates anywhere — everything is stored locally in the app.</string>
+    <string name="permissions_denied_hint">If Android no longer shows the permission dialog, open the app settings and allow Nearby devices (Bluetooth) and precise Location.</string>
+    <string name="open_app_settings">Open app settings</string>
+    <string name="privacy_notice">Detection history is stored locally by this app and is not uploaded to an app backend. Opening the map downloads map tiles for the visible area from OpenStreetMap.</string>
     
     <!-- Main Screen -->
     <string name="menu">Menu</string>
     <string name="map">Map</string>
     <string name="stop_scanner">Stop Scanner</string>
     <string name="start_scanner">Start Scanner</string>
-    <string name="notify_detections">Notify about detections</string>
-    <string name="loading">Loading...</string>
+    <string name="scan_visibility_note">When the app is visible, scanning uses a low-latency callback. When you leave it, Android keeps a filtered, best-effort BLE PendingIntent subscription. The system may throttle it, delay results, or miss advertisements; background scanning is not continuous or guaranteed.</string>
+    <string name="scan_state_visible">Active scan (app visible)</string>
+    <string name="scan_state_background">Passive background subscription active</string>
+    <string name="scan_state_stopped">Scanner stopped</string>
+    <string name="scan_state_permission_required">Bluetooth or precise location permission is missing</string>
+    <string name="scan_state_bluetooth_disabled">Bluetooth is disabled</string>
+    <string name="scan_state_location_disabled">Location Services are off — Android does not deliver BLE scan results</string>
+    <string name="open_location_settings">Open location settings</string>
+    <string name="scan_state_unavailable">Bluetooth LE scanner is unavailable</string>
+    <string name="scan_state_error">Scanner error — press Start to retry</string>
+    <string name="notifications_title">Detection notifications</string>
+    <string name="notifications_subtitle">Notify about matching BitChat advertisements (with a cooldown). Android 13+ will ask for notification permission; declining keeps notifications off and does not stop scanning.</string>
+    <string name="notification_channel_name">BitChat detections</string>
+    <string name="notification_channel_description">Notifications when a BitChat advertisement is detected.</string>
+    <string name="notification_detection_title">BitChat device detected</string>
+    <string name="notification_detection_body">%1$s · RSSI %2$d dBm</string>
+    <string name="loading">Loading…</string>
     <string name="no_devices_found">No devices found</string>
     
     <!-- Device Card -->
@@ -33,8 +48,6 @@
     <string name="no_coordinates">No coordinate data for this device</string>
     <string name="map_hidden_placeholder">Map will appear once the card is on screen</string>
     <string name="map_load_error">Failed to load map</string>
-    <string name="notification_scanning">BLE scanning...</string>
-    <string name="notification_node_detected">BitChat node detected</string>
     
     <!-- Logs Screen -->
     <string name="detection_log">Detection Log</string>

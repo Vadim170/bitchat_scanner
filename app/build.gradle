@@ -28,17 +28,12 @@ android {
 
     defaultConfig {
         applicationId "com.vadim170.bitchatscanner"
-        minSdk 24
+        minSdk 26
         targetSdk 36
-        versionCode 4
-        versionName "1.0.3"
+        versionCode 5
+        versionName "1.1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        
-        // Generate debug symbols for native code (for crash analysis)
-        ndk {
-            debugSymbolLevel 'FULL'
-        }
     }
 
     signingConfigs {
@@ -83,14 +78,9 @@ dependencies {
     implementation libs.androidx.compose.ui.graphics
     implementation libs.androidx.compose.ui.tooling.preview
     implementation libs.androidx.compose.material3
-    
-    // ViewModel support for Compose
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
-    implementation 'androidx.compose.runtime:runtime-livedata:1.5.4'
-    
+    implementation libs.androidx.lifecycle.viewmodel.compose
+    implementation libs.osmdroid
 
-    implementation 'org.osmdroid:osmdroid-android:6.1.17'
-    
     testImplementation libs.junit
     androidTestImplementation libs.androidx.junit
     androidTestImplementation libs.androidx.espresso.core

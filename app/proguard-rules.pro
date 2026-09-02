@@ -1,61 +1,21 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# Project-specific R8 rules. Compose, AndroidX lifecycle and the AGP-generated
+# manifest rules ship their own consumer keeps, so only the gaps are listed here.
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
-
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
+# Readable release stack traces; mapping.txt is published as a CI artifact.
 -keepattributes SourceFile,LineNumberTable
-
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
-
-# Keep runtime annotations and line numbers for debugging.
 -keepattributes *Annotation*
--keepattributes SourceFile,LineNumberTable
--keep public class * extends java.lang.Exception
 
-# Compose
--keep class androidx.compose.** { *; }
--dontwarn androidx.compose.**
-
-# Keep Compose runtime
--keep class androidx.compose.runtime.** { *; }
-
-# ViewModel
--keep class * extends androidx.lifecycle.ViewModel { *; }
--keep class * extends androidx.lifecycle.AndroidViewModel { *; }
-
+# osmdroid ships no consumer rules and resolves tile/archive providers by name.
 -keep class org.osmdroid.** { *; }
 -dontwarn org.osmdroid.**
 
-# Keep data classes
--keep class com.vadim170.bitchatscanner.** { *; }
--keepclassmembers class com.vadim170.bitchatscanner.** {
-    *;
-}
+# ViewModels are instantiated reflectively by the default factory.
+-keep class * extends androidx.lifecycle.ViewModel { <init>(...); }
 
-# Keep data classes constructors and properties
--keepclassmembers class com.vadim170.bitchatscanner.DetectionRow { *; }
--keepclassmembers class com.vadim170.bitchatscanner.LocationPoint { *; }
--keepclassmembers class com.vadim170.bitchatscanner.DeviceSummary { *; }
-
-# Keep Parcelable implementations
+# Standard Parcelable / Serializable safety.
 -keep class * implements android.os.Parcelable {
     public static final android.os.Parcelable$Creator *;
 }
-
-# Keep Serializable classes
 -keepclassmembers class * implements java.io.Serializable {
     static final long serialVersionUID;
     private static final java.io.ObjectStreamField[] serialPersistentFields;

@@ -280,7 +280,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Upload signed release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package.outputs.base_name }}
           if-no-files-found: error
@@ -295,7 +295,7 @@ jobs:
 
       - name: Upload R8 mapping as Actions artifact
         if: ${{ steps.package.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bitchat-scanner-${{ needs.validate.outputs.tag_name }}-r8-mapping
           if-no-files-found: ignore

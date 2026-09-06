@@ -9,6 +9,8 @@ Usage: verify-android-manifest.sh --apk PATH [--output PATH]
 Audits the checked-in manifest and the packaged APK for the BitChat Scanner
 BLE/background-delivery contract. The optional output file receives the
 permission and manifest dumps used by the audit.
+
+Only POSIX tools plus aapt2 are used: GitHub-hosted runners have no ripgrep.
 EOF
 }
 
@@ -50,32 +52,32 @@ if [[ ! -f "${manifest_path}" ]]; then
 fi
 
 forbidden_source_pattern='BleScannerService|android\.app\.Service|startForeground(Service)?|ServiceCompat|FOREGROUND_SERVICE|foregroundServiceType|getRunningServices|startForegroundService|ACCESS_BACKGROUND_LOCATION|BLUETOOTH_ADVERTISE|neverForLocation'
-if rg -n -i "${forbidden_source_pattern}" app/src/main; then
+if grep -rnIiE "${forbidden_source_pattern}" app/src/main; then
   echo "Foreground-service, background-service, advertise, or neverForLocation reference found in production sources." >&2
   exit 1
 fi
 
-if ! rg -n 'android:name="android.hardware.bluetooth_le"' "${manifest_path}"; then
+if ! grep -n 'android:name="android.hardware.bluetooth_le"' "${manifest_path}"; then
   echo "The manifest must declare BLE hardware support." >&2
   exit 1
 fi
-if ! rg -n 'android:required="true"' "${manifest_path}"; then
+if ! grep -n 'android:required="true"' "${manifest_path}"; then
   echo "BLE hardware support must be required by the manifest." >&2
   exit 1
 fi
-if ! rg -n 'android:name="\.BleScanReceiver"' "${manifest_path}"; then
+if ! grep -n 'android:name="\.BleScanReceiver"' "${manifest_path}"; then
   echo "The manifest must register the background scan receiver." >&2
   exit 1
 fi
-if ! rg -n 'android:exported="false"' "${manifest_path}"; then
+if ! grep -n 'android:exported="false"' "${manifest_path}"; then
   echo "The background scan receiver must be explicitly non-exported." >&2
   exit 1
 fi
-if ! rg -n 'android:allowBackup="false"' "${manifest_path}"; then
+if ! grep -n 'android:allowBackup="false"' "${manifest_path}"; then
   echo "Detection history backup must be disabled in the manifest." >&2
   exit 1
 fi
-if ! rg -n 'android:dataExtractionRules="@xml/data_extraction_rules"' "${manifest_path}"; then
+if ! grep -n 'android:dataExtractionRules="@xml/data_extraction_rules"' "${manifest_path}"; then
   echo "Android 12+ device-to-device transfer rules must exclude the detection database." >&2
   exit 1
 fi

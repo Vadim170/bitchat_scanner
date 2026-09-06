@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Checkout requested tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
@@ -130,7 +130,7 @@ jobs:
 
     steps:
       - name: Checkout validated tag commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.tag_sha }}
           fetch-depth: 0
